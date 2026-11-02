@@ -47,9 +47,31 @@ scripts/   build and audit the .wasm.
 TinyGo installed. Rebuild it only when `engine/` changes.
 
 The engine core is plain Go with no wasm in it, so `pnpm test:go` needs no
-TinyGo either. At 200k rows a viewport read is ~240ns and loading the whole
-dataset is ~2.8ms; every mutation rebuilds the row order, which costs ~80us
-and is what `pnpm test:go -- -bench .` measures.
+TinyGo either.
+
+Measured in Node against the committed 25kB module, 200k rows of i32, f64
+and dictionary-encoded string:
+
+| | |
+| --- | --- |
+| `insertColumns` (the whole dataset, one call) | ~14ms |
+| `view(start, 50)` including decoding it in JS | ~2.3us |
+| `setCell` | ~1.3ms |
+
+`pnpm exec node scripts/bench-engine.mjs` reproduces them.
+
+A cell edit costs more than a viewport read because every mutation rebuilds
+the row order, which is O(rows) whatever it touched. That is deliberate: step
+7 makes the order the output of a stored sort/filter spec, where one edited
+cell can move a row anywhere.
+
+### Known limitation: linear memory only grows
+
+The module ships with TinyGo's `leaking` collector, which never reclaims
+anything, so a long-lived table grows and never shrinks (measured: 32MB after
+400k rows arriving in batches). `-gc=conservative` holds memory flat but
+takes a 200k-row insert from 11ms to 1,700ms, which is worse. See the note in
+`scripts/build-wasm.mjs`, and re-measure when TinyGo's wasm GC improves.
 
 ## Scripts
 
@@ -72,7 +94,7 @@ Nothing else does.
 1. ~~Scaffold workspace, tooling, CI~~
 2. ~~Copy the `internal/wasm` helpers and their tests~~
 3. ~~Go `table` package: schema, insert, view~~
-4. ABI in `main.go`, build, `abi.test.ts`
+4. ~~ABI in `main.go`, build, `abi.test.ts`~~
 5. `SyncClient` + `TableStore` + `useWasmTable` / `useTableView`
 6. Demo grid with 200k rows
 7. Sort, filter, search in Go

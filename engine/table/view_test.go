@@ -308,3 +308,164 @@ func TestDictionaryAccessorsRejectBadColumns(t *testing.T) {
 		})
 	}
 }
+
+/* ------------------------------------------------------------------ */
+/* The allocation-free path                                            */
+/* ------------------------------------------------------------------ */
+
+func TestWindowClamping(t *testing.T) {
+	tbl := fourRows(t)
+
+	cases := []struct {
+		name                 string
+		start, count         int32
+		wantStart, wantCount int32
+	}{
+		{"whole table", 0, 4, 0, 4},
+		{"middle", 1, 2, 1, 2},
+		{"count past the end", 2, 100, 2, 2},
+		{"start at the end", 4, 10, 4, 0},
+		{"start past the end", 99, 10, 4, 0},
+		{"negative start", -5, 2, 0, 2},
+		{"negative count", 1, -3, 1, 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			start, count := tbl.Window(tc.start, tc.count)
+			if start != tc.wantStart || count != tc.wantCount {
+				t.Fatalf("Window(%d, %d) = %d, %d; want %d, %d",
+					tc.start, tc.count, start, count, tc.wantStart, tc.wantCount)
+			}
+		})
+	}
+}
+
+func TestViewInto(t *testing.T) {
+	tbl := fourRows(t)
+	dst := make([]int32, 10)
+
+	n := tbl.ViewInto(1, 2, dst)
+	if n != 2 {
+		t.Fatalf("ViewInto returned %d, want 2", n)
+	}
+	if !equalI32(dst[:n], []int32{1, 2}) {
+		t.Fatalf("dst = %v, want [1 2]", dst[:n])
+	}
+
+	// The same rows View would hand back, without the allocation.
+	v := tbl.View(1, 2)
+	if !equalI32(dst[:n], v.RowIDs) {
+		t.Fatalf("ViewInto gave %v, View gave %v", dst[:n], v.RowIDs)
+	}
+}
+
+func TestViewIntoStopsAtTheDestinationLength(t *testing.T) {
+	tbl := fourRows(t)
+
+	// A short destination truncates rather than overflowing: the ABI sizes
+	// its scratch from the clamped window, but a caller that got it wrong
+	// should lose rows, not write past the end.
+	small := make([]int32, 2)
+	if n := tbl.ViewInto(0, 4, small); n != 2 {
+		t.Fatalf("ViewInto into a 2-slot buffer returned %d, want 2", n)
+	}
+	if !equalI32(small, []int32{0, 1}) {
+		t.Fatalf("dst = %v, want [0 1]", small)
+	}
+
+	if n := tbl.ViewInto(0, 4, nil); n != 0 {
+		t.Fatalf("ViewInto into nil returned %d, want 0", n)
+	}
+}
+
+func TestGather(t *testing.T) {
+	tbl := fourRows(t)
+	ids := []int32{3, 1}
+
+	i32 := make([]int32, 2)
+	if err := tbl.GatherI32(0, ids, i32); err != nil {
+		t.Fatalf("GatherI32: %v", err)
+	}
+	if !equalI32(i32, []int32{40, 20}) {
+		t.Fatalf("i32 = %v, want [40 20]", i32)
+	}
+
+	f64 := make([]float64, 2)
+	if err := tbl.GatherF64(1, ids, f64); err != nil {
+		t.Fatalf("GatherF64: %v", err)
+	}
+	if !equalF64(f64, []float64{4.5, 2.5}) {
+		t.Fatalf("f64 = %v, want [4.5 2.5]", f64)
+	}
+
+	// A string column yields dictionary ids through the same i32 path,
+	// which is what the wire format carries.
+	dictIDs := make([]int32, 2)
+	if err := tbl.GatherI32(2, ids, dictIDs); err != nil {
+		t.Fatalf("GatherI32 on a string column: %v", err)
+	}
+	dict, _ := tbl.DictSince(2, 0)
+	if dict[dictIDs[0]] != "held" || dict[dictIDs[1]] != "shipped" {
+		t.Fatalf("ids %v resolve to %q, %q", dictIDs, dict[dictIDs[0]], dict[dictIDs[1]])
+	}
+}
+
+func TestGatherRejects(t *testing.T) {
+	tbl := fourRows(t)
+	ids := []int32{0, 1}
+
+	cases := []struct {
+		name string
+		op   func() error
+		want error
+	}{
+		{"i32 from an f64 column", func() error {
+			return tbl.GatherI32(1, ids, make([]int32, 2))
+		}, ErrWrongType},
+		{"f64 from an i32 column", func() error {
+			return tbl.GatherF64(0, ids, make([]float64, 2))
+		}, ErrWrongType},
+		{"f64 from a string column", func() error {
+			return tbl.GatherF64(2, ids, make([]float64, 2))
+		}, ErrWrongType},
+		{"column past the end", func() error {
+			return tbl.GatherI32(9, ids, make([]int32, 2))
+		}, ErrNoSuchColumn},
+		{"negative column", func() error {
+			return tbl.GatherF64(-1, ids, make([]float64, 2))
+		}, ErrNoSuchColumn},
+		{"destination too short", func() error {
+			return tbl.GatherI32(0, ids, make([]int32, 1))
+		}, ErrRowCount},
+		{"f64 destination too short", func() error {
+			return tbl.GatherF64(1, ids, make([]float64, 1))
+		}, ErrRowCount},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := tc.op(); !errors.Is(err, tc.want) {
+				t.Fatalf("got %v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestViewIntoAndGatherAllocateNothing(t *testing.T) {
+	tbl := fourRows(t)
+	ids := make([]int32, 4)
+	i32 := make([]int32, 4)
+	f64 := make([]float64, 4)
+
+	// The reason this path exists: the ABI runs it on every scroll frame.
+	allocs := testing.AllocsPerRun(100, func() {
+		tbl.ViewInto(0, 4, ids)
+		_ = tbl.GatherI32(0, ids, i32)
+		_ = tbl.GatherF64(1, ids, f64)
+		_ = tbl.GatherI32(2, ids, i32)
+	})
+	if allocs != 0 {
+		t.Fatalf("allocated %v times per run, want 0", allocs)
+	}
+}

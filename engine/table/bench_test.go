@@ -156,3 +156,46 @@ func BenchmarkRebuildOrder(b *testing.B) {
 		tbl.rebuildOrder()
 	}
 }
+
+// The two ways to read a viewport, measured against each other. View is the
+// comfortable API and allocates a fresh slice per column per call;
+// ViewInto + Gather reuse the caller's scratch and allocate nothing. The ABI
+// uses the second one because it runs on every scroll frame.
+func BenchmarkViewAllocating(b *testing.B) {
+	tbl := benchTable(b)
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		v := tbl.View(0, 50)
+		if len(v.RowIDs) != 50 {
+			b.Fatalf("View returned %d rows", len(v.RowIDs))
+		}
+	}
+}
+
+func BenchmarkViewIntoReusingScratch(b *testing.B) {
+	tbl := benchTable(b)
+	ids := make([]int32, 50)
+	i32 := make([]int32, 50)
+	f64 := make([]float64, 50)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		n := tbl.ViewInto(0, 50, ids)
+		if n != 50 {
+			b.Fatalf("ViewInto returned %d rows", n)
+		}
+		if err := tbl.GatherI32(0, ids, i32); err != nil {
+			b.Fatal(err)
+		}
+		if err := tbl.GatherF64(1, ids, f64); err != nil {
+			b.Fatal(err)
+		}
+		if err := tbl.GatherI32(2, ids, i32); err != nil {
+			b.Fatal(err)
+		}
+	}
+}

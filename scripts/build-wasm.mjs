@@ -13,6 +13,20 @@
  * reaches the host only through its own exports. Keeping it that way is what
  * inspect-wasm.mjs checks, and it is why the engine can run identically on
  * the main thread, in a worker, and in Node under vitest.
+ *
+ * -gc=leaking is this target's default, pinned here so a TinyGo upgrade
+ * cannot change it silently. It never reclaims anything, which is a real
+ * limitation: the engine allocates per call, so linear memory doubles every
+ * so many inserts and never comes back down (measured: 32MB after 400k rows
+ * arriving in batches).
+ *
+ * -gc=conservative fixes that, and was measured and rejected. It holds
+ * memory flat but takes a 200k-row insertColumns from 11ms to 1,700ms,
+ * because every allocation may trigger a scan of a heap that is growing
+ * into the megabytes. A 156x regression on the one call the flagship demo
+ * makes is worse than the leak. Revisit when TinyGo's wasm GC improves, or
+ * when the engine stops allocating per row; benchmark with
+ * scripts/bench-engine.mjs before changing this.
  */
 import { spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
@@ -37,11 +51,23 @@ if (run("tinygo", ["version"], { stdio: "ignore" }) === null) {
 mkdirSync(dirname(out), { recursive: true });
 
 console.log("building src/wasm/engine.wasm");
-const built = run("tinygo", ["build", "-target=wasm-unknown", "-no-debug", "-o", out, "."], {
-  cwd: resolve(root, "engine"),
-});
+const built = run(
+  "tinygo",
+  ["build", "-target=wasm-unknown", "-gc=leaking", "-no-debug", "-o", out, "."],
+  {
+    cwd: resolve(root, "engine"),
+  }
+);
 if (built !== 0) exit(built);
 
 console.log();
-// No allow-list: this engine imports nothing at all.
-exit(run("node", [resolve(root, "scripts/inspect-wasm.mjs"), out]));
+// No allow-list: this engine imports nothing at all. The manifest also
+// pins the export list, so an accidental //go:wasmexport fails the build.
+exit(
+  run("node", [
+    resolve(root, "scripts/inspect-wasm.mjs"),
+    out,
+    "--expect-exports-from",
+    resolve(root, "scripts/engine-exports.mjs"),
+  ])
+);

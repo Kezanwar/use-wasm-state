@@ -49,7 +49,7 @@
     "dev": "pnpm build && pnpm --filter use-wasm-state-demo dev",
     "build": "tsup",
     "build:wasm": "node scripts/build-wasm.mjs",
-    "inspect:wasm": "node scripts/inspect-wasm.mjs src/wasm/engine.wasm",
+    "inspect:wasm": "node scripts/inspect-wasm.mjs src/wasm/engine.wasm --expect-exports-from scripts/engine-exports.mjs",
     "typecheck": "tsc --noEmit && pnpm --filter use-wasm-state-demo exec tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

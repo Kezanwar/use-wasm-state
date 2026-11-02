@@ -37,20 +37,7 @@ type View struct {
 //
 // The returned slices are fresh copies and the caller owns them.
 func (t *Table) View(start, count int32) View {
-	n := int32(len(t.order))
-
-	if start < 0 {
-		start = 0
-	}
-	if count < 0 {
-		count = 0
-	}
-	if start > n {
-		start = n
-	}
-	if start+count > n {
-		count = n - start
-	}
+	start, count = t.Window(start, count)
 
 	ids := make([]int32, count)
 	copy(ids, t.order[start:start+count])
@@ -112,4 +99,88 @@ func (t *Table) DictSince(col, from int32) ([]string, error) {
 		return nil, nil
 	}
 	return c.dict.values[from:], nil
+}
+
+/* ------------------------------------------------------------------ */
+/* The allocation-free path                                            */
+/* ------------------------------------------------------------------ */
+
+// Window clamps a requested window to the live rows and returns the offset
+// it actually starts at and how many rows it covers.
+//
+// Exported because the ABI has to size its buffer before it reads anything,
+// and because clamping is the contract: a grid mid-scroll asks for rows that
+// may have just stopped existing.
+func (t *Table) Window(start, count int32) (int32, int32) {
+	n := int32(len(t.order))
+	if start < 0 {
+		start = 0
+	}
+	if count < 0 {
+		count = 0
+	}
+	if start > n {
+		start = n
+	}
+	if start+count > n {
+		count = n - start
+	}
+	return start, count
+}
+
+// ViewInto copies the window's row ids into dst and returns how many it
+// wrote, which is min(len(dst), the clamped window).
+//
+// The same read as View, without the allocation. View is the comfortable
+// API; this is what the ABI uses sixty times a second, where a fresh slice
+// per frame is a fresh slice per frame.
+func (t *Table) ViewInto(start, count int32, dst []int32) int32 {
+	start, count = t.Window(start, count)
+	if int32(len(dst)) < count {
+		count = int32(len(dst))
+	}
+	copy(dst[:count], t.order[start:start+count])
+	return count
+}
+
+// GatherI32 copies one i32 column's values for the given row ids into dst.
+// A string column is gathered the same way and yields its dictionary ids.
+//
+// ids come from ViewInto, so they are live row ids and need no bounds check
+// here beyond dst being long enough.
+func (t *Table) GatherI32(col int32, ids []int32, dst []int32) error {
+	c, err := t.columnOf(col, I32)
+	if err != nil {
+		// A string column stores dictionary ids in the same []int32, and
+		// the wire format sends them as ints, so it is gathered here too.
+		var strErr error
+		c, strErr = t.columnOf(col, String)
+		if strErr != nil {
+			return err
+		}
+	}
+	if len(dst) < len(ids) {
+		return ErrRowCount
+	}
+	src := c.i32
+	for i, id := range ids {
+		dst[i] = src[id]
+	}
+	return nil
+}
+
+// GatherF64 copies one f64 column's values for the given row ids into dst.
+func (t *Table) GatherF64(col int32, ids []int32, dst []float64) error {
+	c, err := t.columnOf(col, F64)
+	if err != nil {
+		return err
+	}
+	if len(dst) < len(ids) {
+		return ErrRowCount
+	}
+	src := c.f64
+	for i, id := range ids {
+		dst[i] = src[id]
+	}
+	return nil
 }
