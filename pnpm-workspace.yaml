@@ -1,0 +1,7 @@
+packages:
+  - "."
+  - "examples/react-demo"
+
+# esbuild (via tsup and vite) needs its install script to place the native binary.
+allowBuilds:
+  esbuild: true

@@ -1,0 +1,81 @@
+{
+  "name": "use-wasm-state",
+  "version": "0.0.0",
+  "description": "React state that lives in a WebAssembly engine written in Go. Specialised data structures whose operations run in wasm; only what React renders crosses to JS.",
+  "keywords": [
+    "react",
+    "wasm",
+    "webassembly",
+    "state",
+    "table",
+    "data-grid",
+    "web-worker",
+    "typescript",
+    "tinygo"
+  ],
+  "license": "MIT",
+  "author": "Kez Anwar",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Kezanwar/use-wasm-state.git"
+  },
+  "homepage": "https://github.com/Kezanwar/use-wasm-state#readme",
+  "bugs": {
+    "url": "https://github.com/Kezanwar/use-wasm-state/issues"
+  },
+  "type": "module",
+  "sideEffects": false,
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.cjs"
+    },
+    "./engine.wasm": "./dist/engine.wasm",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "llm.md"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "packageManager": "pnpm@11.15.1",
+  "scripts": {
+    "dev": "pnpm build && pnpm --filter use-wasm-state-demo dev",
+    "build": "tsup",
+    "build:wasm": "node scripts/build-wasm.mjs",
+    "inspect:wasm": "node scripts/inspect-wasm.mjs src/wasm/engine.wasm",
+    "typecheck": "tsc --noEmit && pnpm --filter use-wasm-state-demo exec tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:go": "cd engine && go test ./...",
+    "test:browser": "playwright test",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "prepublishOnly": "pnpm build && pnpm test"
+  },
+  "peerDependencies": {
+    "react": ">=18"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.49.0",
+    "@testing-library/dom": "^10.4.0",
+    "@testing-library/react": "^16.1.0",
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "jsdom": "^25.0.1",
+    "prettier": "^3.9.10",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tsup": "^8.3.5",
+    "typescript": "^5.7.2",
+    "vitest": "^2.1.8",
+    "wabt": "^1.0.36"
+  }
+}

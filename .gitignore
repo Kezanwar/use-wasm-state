@@ -1,1 +1,11 @@
+node_modules/
+dist/
+coverage/
+*.tsbuildinfo
+.DS_Store
+.vite/
+examples/react-demo/dist/
+test-results/
+playwright-report/
+.playwright/
 internal_docs/

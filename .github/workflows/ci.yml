@@ -1,0 +1,73 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    name: typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.22"
+          # The engine has no module dependencies, so there is no go.sum to
+          # key a cache on and setup-go fails looking for one.
+          cache: false
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm typecheck
+
+      # Before the tests: test/dist-output.test.ts asserts things about the
+      # built bundles and skips itself if dist/ is absent.
+      - run: pnpm build
+
+      - run: pnpm test
+
+      # The engine core is plain Go with no wasm in sight, so it is tested
+      # without TinyGo. TinyGo is only needed to rebuild the .wasm, which is
+      # committed.
+      - run: pnpm test:go
+
+      - name: Check the committed engine.wasm still imports nothing
+        run: pnpm inspect:wasm
+
+  e2e:
+    name: browser (Playwright)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm exec playwright install --with-deps chromium
+
+      # Builds the package and starts the Vite demo itself (see
+      # playwright.config.ts webServer).
+      - run: pnpm test:browser
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
