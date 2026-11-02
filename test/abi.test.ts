@@ -12,6 +12,7 @@ import {
 import {
   createTable,
   deleteRows,
+  dictPacked,
   insertColumns,
   newEngine,
   readDictSince,
@@ -19,8 +20,8 @@ import {
   serveEngine,
   setCellString,
   viewPacked,
-  writeBytes,
 } from "./helpers/engine";
+import { bytesIn, f64In, i32In, stringIn, u32In, withInput } from "../src/engine/input";
 
 /**
  * The ABI, exercised against the committed src/wasm/engine.wasm through the
@@ -94,12 +95,13 @@ describe("alloc / free", () => {
     expect(() => e.free(0)).not.toThrow();
   });
 
-  it("round-trips bytes written from JS", async () => {
+  it("round-trips bytes written through the input buffer", async () => {
     const e = await newEngine();
     const data = new Uint8Array([1, 2, 3, 250, 255]);
-    const ptr = writeBytes(e, data);
-    expect([...new Uint8Array(e.memory.buffer, ptr, data.length)]).toEqual([...data]);
-    e.free(ptr);
+    const seen = withInput(e, [bytesIn(data)], ([block]) => [
+      ...new Uint8Array(e.memory.buffer, block.ptr, block.len),
+    ]);
+    expect(seen).toEqual([...data]);
   });
 });
 
@@ -148,12 +150,8 @@ describe("createTable / dropTable", () => {
     ];
 
     for (const [name, bytes] of cases) {
-      const ptr = writeBytes(e, bytes);
-      try {
-        expect(e.createTable(ptr, bytes.byteLength), name).toBe(Status.BadSchema);
-      } finally {
-        if (ptr !== 0) e.free(ptr);
-      }
+      const status = withInput(e, [bytesIn(bytes)], ([b]) => e.createTable(b.ptr, b.len));
+      expect(status, name).toBe(Status.BadSchema);
     }
   });
 
@@ -258,34 +256,41 @@ describe("insertColumns", () => {
     const e = await newEngine();
     const h = createTable(e, SCHEMA);
 
-    // One descriptor pointing at an odd offset. Reinterpreting that as
-    // float64s would be undefined behaviour, so it has to be refused.
-    const descs = new Uint32Array(SCHEMA.length * 4);
-    const base = e.alloc(64);
-    descs.set([base + 1, 1, 0, 1], 0);
-    descs.set([base + 1, 1, 0, 1], 4);
-    descs.set([base + 1, 1, base, 1], 8);
-    const descPtr = writeBytes(e, new Uint8Array(descs.buffer));
-
-    expect(e.insertColumns(h, descPtr, SCHEMA.length)).toBe(Status.BadArgument);
-    e.free(descPtr);
-    e.free(base);
+    // Descriptors pointing one byte off an aligned offset. Reinterpreting
+    // that as float64s would be undefined behaviour, so it has to be
+    // refused rather than read.
+    const status = withInput(
+      e,
+      [bytesIn(new Uint8Array(64)), u32In(new Uint32Array(SCHEMA.length * 4))],
+      ([data, descPtr]) => {
+        const descs = new Uint32Array(e.memory.buffer, descPtr.ptr, SCHEMA.length * 4);
+        descs.set([data.ptr + 1, 1, 0, 1], 0);
+        descs.set([data.ptr + 1, 1, 0, 1], 4);
+        descs.set([data.ptr + 1, 1, data.ptr, 1], 8);
+        return e.insertColumns(h, descPtr.ptr, SCHEMA.length);
+      }
+    );
+    expect(status).toBe(Status.BadArgument);
   });
 
   it("rejects string offsets that run past the blob", async () => {
     const e = await newEngine();
     const h = createTable(e, [{ name: "s", type: ColumnType.String }]);
 
-    const blob = writeBytes(e, new TextEncoder().encode("ab"));
-    const offsets = writeBytes(e, new Uint8Array(Uint32Array.from([0, 999]).buffer));
-    const descs = Uint32Array.from([blob, 2, offsets, 1]);
-    const descPtr = writeBytes(e, new Uint8Array(descs.buffer));
-
-    expect(e.insertColumns(h, descPtr, 1)).toBe(Status.BadArgument);
-
-    e.free(blob);
-    e.free(offsets);
-    e.free(descPtr);
+    const status = withInput(
+      e,
+      [
+        bytesIn(new TextEncoder().encode("ab")),
+        u32In(Uint32Array.from([0, 999])),
+        u32In(new Uint32Array(4)),
+      ],
+      ([blob, offsets, descPtr]) => {
+        new Uint32Array(e.memory.buffer, descPtr.ptr, 4).set([blob.ptr, blob.len, offsets.ptr, 1]);
+        return e.insertColumns(h, descPtr.ptr, 1);
+      }
+    );
+    // Offsets that leave the blob are caught before a byte of it is read.
+    expect(status).toBe(Status.RowCount);
   });
 });
 
@@ -751,5 +756,217 @@ describe("under churn", () => {
     expect([...v.columns[0]!]).toEqual([0, 1, 2]);
     expect(v.columns[1]![2]).toBeCloseTo(2.5, 10);
     expect(e.dictLen(h, 2)).toBe(LABELS.length);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* Engine-owned buffers                                                */
+/* ------------------------------------------------------------------ */
+
+describe("the engine's own buffers", () => {
+  it("hands back the same input pointer when nothing has to grow", async () => {
+    const e = await newEngine();
+
+    const first = e.inputBuffer(256);
+    expect(first).toBeGreaterThan(0);
+    expect(first % 8).toBe(0);
+    expect(e.inputBuffer(256)).toBe(first);
+    // A smaller ask fits in what is already there.
+    expect(e.inputBuffer(64)).toBe(first);
+
+    // A bigger one may move it, and must still be aligned.
+    const grown = e.inputBuffer(1024 * 1024);
+    expect(grown % 8).toBe(0);
+    // ...and from then on the larger buffer serves the smaller asks.
+    expect(e.inputBuffer(64)).toBe(grown);
+  });
+
+  it("returns 0 for a non-positive input size", async () => {
+    const e = await newEngine();
+    expect(e.inputBuffer(0)).toBe(0);
+    expect(e.inputBuffer(-1)).toBe(0);
+  });
+
+  it("hands back the same view pointer across calls of the same size", async () => {
+    const { e, h } = await seeded(1000);
+
+    viewPacked(e, h, 0, 50);
+    const second = viewPacked(e, h, 0, 50)!;
+    const third = viewPacked(e, h, 50, 50)!;
+
+    expect(third.ptr).toBe(second.ptr);
+    expect(third.len).toBe(second.len);
+  });
+
+  it("hands back the same dictionary pointer across calls of the same size", async () => {
+    const { e, h } = await seeded(60);
+
+    dictPacked(e, h, 2, 0);
+    const second = dictPacked(e, h, 2, 0)!;
+    const third = dictPacked(e, h, 2, 0)!;
+
+    // It used to be freshly allocated and freed by JS on every call.
+    expect(third.ptr).toBe(second.ptr);
+    expect(third.len).toBe(second.len);
+  });
+
+  it("keeps the input, view and dictionary buffers apart", async () => {
+    const { e, h } = await seeded(100);
+
+    const input = e.inputBuffer(1024);
+    const view = viewPacked(e, h, 0, 50)!;
+    const dict = dictPacked(e, h, 2, 0)!;
+
+    // A reply that landed on top of its own request would corrupt the next
+    // call that reused the arguments.
+    const overlaps = (a: { ptr: number; len: number }, b: { ptr: number; len: number }) =>
+      a.ptr < b.ptr + b.len && b.ptr < a.ptr + a.len;
+
+    expect(overlaps({ ptr: input, len: 1024 }, view)).toBe(false);
+    expect(overlaps({ ptr: input, len: 1024 }, dict)).toBe(false);
+    expect(overlaps(view, dict)).toBe(false);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* withInput                                                           */
+/* ------------------------------------------------------------------ */
+
+describe("withInput", () => {
+  it("lays several arguments out in one buffer, each 8-byte aligned", async () => {
+    const e = await newEngine();
+
+    withInput(
+      e,
+      [i32In([1, 2, 3]), f64In([1.5, 2.5]), stringIn("héllo"), bytesIn(new Uint8Array([9]))],
+      ([ints, floats, text, raw]) => {
+        for (const block of [ints, floats, text, raw]) {
+          expect(block.ptr % 8, "every block starts aligned").toBe(0);
+        }
+
+        // len is what the engine's parameter means: elements for arrays,
+        // bytes for strings.
+        expect(ints.len).toBe(3);
+        expect(ints.byteLength).toBe(12);
+        expect(floats.len).toBe(2);
+        expect(floats.byteLength).toBe(16);
+        expect(text.len).toBe(6); // 5 characters, 6 bytes
+        expect(raw.len).toBe(1);
+
+        // Nothing overlaps, and the values survive the round trip.
+        expect([...new Int32Array(e.memory.buffer, ints.ptr, 3)]).toEqual([1, 2, 3]);
+        expect([...new Float64Array(e.memory.buffer, floats.ptr, 2)]).toEqual([1.5, 2.5]);
+        expect(new TextDecoder().decode(new Uint8Array(e.memory.buffer, text.ptr, text.len))).toBe(
+          "héllo"
+        );
+      }
+    );
+  });
+
+  it("writes f64 data somewhere a Float64Array can be mapped", async () => {
+    const e = await newEngine();
+    // An odd-length i32 argument first, so the f64 block has to be padded
+    // past an offset that is only 4-aligned.
+    withInput(e, [i32In([1, 2, 3]), f64In([0.1, 0.2])], ([, floats]) => {
+      expect(floats.ptr % 8).toBe(0);
+      expect(() => new Float64Array(e.memory.buffer, floats.ptr, 2)).not.toThrow();
+      expect([...new Float64Array(e.memory.buffer, floats.ptr, 2)]).toEqual([0.1, 0.2]);
+    });
+  });
+
+  it("is correct after the input buffer has had to grow", async () => {
+    const e = await newEngine();
+    const h = createTable(e, SCHEMA);
+
+    // Start small, then jump well past it. Growing moves the buffer, so a
+    // helper that asked for it before sizing everything would hand out
+    // offsets into the old block.
+    expect(
+      insertColumns(e, h, [
+        { type: ColumnType.I32, values: [1] },
+        { type: ColumnType.F64, values: [1.5] },
+        { type: ColumnType.String, values: ["a"] },
+      ])
+    ).toBe(0);
+
+    const big = 50_000;
+    const ids = Int32Array.from({ length: big }, (_, i) => i);
+    const prices = Float64Array.from({ length: big }, (_, i) => i + 0.25);
+    const statuses = Array.from({ length: big }, (_, i) => LABELS[i % LABELS.length]!);
+
+    expect(
+      insertColumns(e, h, [
+        { type: ColumnType.I32, values: ids },
+        { type: ColumnType.F64, values: prices },
+        { type: ColumnType.String, values: statuses },
+      ])
+    ).toBe(1);
+
+    // Both batches read back correctly, so no descriptor pointed at a
+    // stale offset.
+    const first = readView(e, h, 0, 1, SCHEMA)!;
+    expect(first.columns[0]![0]).toBe(1);
+    expect(first.columns[1]![0]).toBe(1.5);
+
+    const last = readView(e, h, big, 1, SCHEMA)!;
+    expect(last.columns[0]![0]).toBe(big - 1);
+    expect(last.columns[1]![0]).toBeCloseTo(big - 1 + 0.25, 10);
+  });
+
+  it("handles an operation whose arguments are all empty", async () => {
+    const e = await newEngine();
+    const h = createTable(e, SCHEMA);
+
+    // No buffer is needed at all, and the engine reads a null pointer with
+    // a zero length as "nothing".
+    expect(deleteRows(e, h, [])).toBe(Status.OK);
+    expect(
+      withInput(e, [i32In([])], ([block]) => {
+        expect(block.ptr).toBe(0);
+        expect(block.len).toBe(0);
+        return Status.OK;
+      })
+    ).toBe(Status.OK);
+  });
+
+  it("returns whatever the body returns", async () => {
+    const e = await newEngine();
+    expect(withInput(e, [i32In([1])], () => "done")).toBe("done");
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* The view header                                                     */
+/* ------------------------------------------------------------------ */
+
+describe("the view header", () => {
+  it("reports where the window actually begins", async () => {
+    const { e, h } = await seeded(10);
+
+    const cases: Array<[string, number, number, number, number]> = [
+      // name, requested start, count, expected start, expected rows
+      ["exact", 0, 3, 0, 3],
+      ["middle", 4, 3, 4, 3],
+      ["clamped at the end", 8, 10, 8, 2],
+      ["past the end", 50, 10, 10, 0],
+      ["negative start", -5, 2, 0, 2],
+    ];
+
+    for (const [name, start, count, wantStart, wantRows] of cases) {
+      const v = readView(e, h, start, count, SCHEMA)!;
+      expect(v.start, name).toBe(wantStart);
+      expect(v.ids.length, name).toBe(wantRows);
+    }
+  });
+
+  it("reports a start that moved because rows were deleted", async () => {
+    const { e, h } = await seeded(10);
+    expect(deleteRows(e, h, [0, 1, 2, 3, 4, 5, 6, 7])).toBe(Status.OK);
+
+    // Two rows left, so a request for row 5 lands at the end. Without the
+    // start on the wire JS could not tell that from an empty table.
+    const v = readView(e, h, 5, 10, SCHEMA)!;
+    expect(v.start).toBe(2);
+    expect(v.ids.length).toBe(0);
   });
 });

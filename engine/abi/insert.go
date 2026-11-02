@@ -39,36 +39,3 @@ func DecodeDescs(b []byte, n int32) ([]ColumnDesc, error) {
 	}
 	return out, nil
 }
-
-// DecodeStrings splits one UTF-8 blob into rowCount strings using rowCount+1
-// byte offsets.
-//
-// One blob plus offsets rather than a pointer per row: 200k rows cross as
-// two buffers instead of 200k, and the strings arrive in one contiguous run
-// the engine walks once. The returned strings are copies, so JS can free the
-// blob as soon as this returns.
-func DecodeStrings(blob, offsets []byte, rowCount int32) ([]string, error) {
-	if rowCount < 0 || len(offsets) < (int(rowCount)+1)*4 {
-		return nil, ErrBadArgument
-	}
-	if rowCount == 0 {
-		return nil, nil
-	}
-
-	out := make([]string, rowCount)
-	prev := binary.LittleEndian.Uint32(offsets)
-	if int(prev) > len(blob) {
-		return nil, ErrBadArgument
-	}
-	for i := int32(0); i < rowCount; i++ {
-		next := binary.LittleEndian.Uint32(offsets[(i+1)*4:])
-		// Offsets must run forwards and stay inside the blob. Anything else
-		// is a JS bug that would otherwise read whatever is next in memory.
-		if next < prev || int(next) > len(blob) {
-			return nil, ErrBadArgument
-		}
-		out[i] = string(blob[prev:next])
-		prev = next
-	}
-	return out, nil
-}

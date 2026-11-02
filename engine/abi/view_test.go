@@ -141,18 +141,21 @@ func decodeView(t testing.TB, b []byte, s table.Schema) ([]int32, []any) {
 func TestEncodeView(t *testing.T) {
 	tbl := seededTable(t, 10)
 
+	// wantStart is where the window actually begins after clamping, which
+	// is what the header's second word carries.
 	cases := []struct {
-		name    string
-		start   int32
-		count   int32
-		wantIDs []int32
+		name      string
+		start     int32
+		count     int32
+		wantStart uint32
+		wantIDs   []int32
 	}{
-		{"from the start", 0, 3, []int32{0, 1, 2}},
-		{"from the middle", 4, 3, []int32{4, 5, 6}},
-		{"clamped at the end", 8, 10, []int32{8, 9}},
-		{"past the end", 50, 10, nil},
-		{"zero count", 0, 0, nil},
-		{"negative start", -5, 2, []int32{0, 1}},
+		{"from the start", 0, 3, 0, []int32{0, 1, 2}},
+		{"from the middle", 4, 3, 4, []int32{4, 5, 6}},
+		{"clamped at the end", 8, 10, 8, []int32{8, 9}},
+		{"past the end", 50, 10, 10, nil},
+		{"zero count", 0, 0, 0, nil},
+		{"negative start", -5, 2, 0, []int32{0, 1}},
 	}
 
 	for _, tc := range cases {
@@ -163,8 +166,8 @@ func TestEncodeView(t *testing.T) {
 			if int(n) != len(tc.wantIDs) {
 				t.Fatalf("header says %d rows, want %d", n, len(tc.wantIDs))
 			}
-			if reserved := binary.LittleEndian.Uint32(b[4:]); reserved != 0 {
-				t.Errorf("reserved word = %d, want 0", reserved)
+			if got := binary.LittleEndian.Uint32(b[4:]); got != tc.wantStart {
+				t.Errorf("clamped start = %d, want %d", got, tc.wantStart)
 			}
 
 			ids, cols := decodeView(t, b, tbl.Schema())
@@ -223,17 +226,17 @@ func TestEncodeViewBufferGrowsAndNeverShrinks(t *testing.T) {
 	tbl := seededTable(t, 500)
 
 	EncodeView(tbl, 0, 10)
-	small := cap(ViewBuffer())
+	small := ViewCapacity()
 
 	EncodeView(tbl, 0, 400)
-	big := cap(ViewBuffer())
+	big := ViewCapacity()
 	if big <= small {
 		t.Fatalf("buffer did not grow: %d then %d", small, big)
 	}
 
 	EncodeView(tbl, 0, 10)
-	if cap(ViewBuffer()) < big {
-		t.Fatalf("buffer shrank back to %d from %d", cap(ViewBuffer()), big)
+	if ViewCapacity() < big {
+		t.Fatalf("buffer shrank back to %d from %d", ViewCapacity(), big)
 	}
 }
 

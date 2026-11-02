@@ -469,3 +469,143 @@ func TestViewIntoAndGatherAllocateNothing(t *testing.T) {
 		t.Fatalf("allocated %v times per run, want 0", allocs)
 	}
 }
+
+func TestInternBytesMatchesIntern(t *testing.T) {
+	tbl := newTestTable(t, Schema{{Name: "s", Type: String}})
+
+	if _, err := tbl.InsertColumns([]ColumnData{{Strings: []string{"a", "b", "a"}}}); err != nil {
+		t.Fatalf("InsertColumns: %v", err)
+	}
+
+	// The bytes path has to agree with the string path about which id a
+	// value has, or an edit would silently change what a cell means.
+	if err := tbl.SetStringBytes(2, 0, []byte("b")); err != nil {
+		t.Fatalf("SetStringBytes: %v", err)
+	}
+	if n, _ := tbl.DictLen(0); n != 2 {
+		t.Fatalf("DictLen() = %d, want 2: an existing value must not append", n)
+	}
+
+	v := tbl.View(0, 3)
+	if !equalI32(v.Cols[0].I32, []int32{0, 1, 1}) {
+		t.Fatalf("ids = %v, want [0 1 1]", v.Cols[0].I32)
+	}
+
+	// A value the column has never held does append.
+	if err := tbl.SetStringBytes(0, 0, []byte("c")); err != nil {
+		t.Fatalf("SetStringBytes: %v", err)
+	}
+	if n, _ := tbl.DictLen(0); n != 3 {
+		t.Fatalf("DictLen() = %d, want 3", n)
+	}
+}
+
+func TestDictionarySurvivesHashCollisions(t *testing.T) {
+	d := &dictionary{}
+	target := d.add(hashString("target"), "target")
+	decoy := d.add(hashString("decoy"), "decoy")
+
+	// Force the decoy into the target's bucket, so a lookup has to walk
+	// past a value that hashes the same and is not it. Real collisions are
+	// rare enough that they would otherwise never be exercised.
+	h := hashString("target")
+	d.index[h] = append([]int32{decoy}, d.index[h]...)
+
+	if got := d.internBytes([]byte("target")); got != target {
+		t.Errorf("internBytes = %d, want %d: the bucket walk stopped at the decoy", got, target)
+	}
+	if got := d.intern("target"); got != target {
+		t.Errorf("intern = %d, want %d", got, target)
+	}
+	if d.len() != 2 {
+		t.Fatalf("dictionary grew to %d, want 2", d.len())
+	}
+
+	// A value that collides but is genuinely new still appends.
+	before := d.len()
+	fresh := d.internBytes([]byte("brand new"))
+	if fresh != before {
+		t.Fatalf("new value got id %d, want %d", fresh, before)
+	}
+}
+
+func TestHashAgreesAcrossStringAndBytes(t *testing.T) {
+	for _, v := range []string{"", "a", "status", "caf\xc3\xa9", "a longer value than most"} {
+		if hashString(v) != hashBytes([]byte(v)) {
+			t.Errorf("hashes disagree for %q", v)
+		}
+	}
+}
+
+func TestStringEqualsBytes(t *testing.T) {
+	cases := []struct {
+		s    string
+		b    string
+		want bool
+	}{
+		{"", "", true},
+		{"abc", "abc", true},
+		{"abc", "abd", false},
+		{"abc", "ab", false},
+		{"ab", "abc", false},
+		{"caf\xc3\xa9", "caf\xc3\xa9", true},
+	}
+	for _, tc := range cases {
+		if got := stringEqualsBytes(tc.s, []byte(tc.b)); got != tc.want {
+			t.Errorf("stringEqualsBytes(%q, %q) = %v, want %v", tc.s, tc.b, got, tc.want)
+		}
+	}
+}
+
+func TestPackedInsertMatchesStringInsert(t *testing.T) {
+	values := []string{"new", "shipped", "new", "", "held"}
+
+	blob := []byte("newshippednewheld")
+	offsets := []int32{0, 3, 10, 13, 13, 17}
+
+	viaStrings := newTestTable(t, Schema{{Name: "s", Type: String}})
+	if _, err := viaStrings.InsertColumns([]ColumnData{{Strings: values}}); err != nil {
+		t.Fatalf("InsertColumns: %v", err)
+	}
+
+	viaPacked := newTestTable(t, Schema{{Name: "s", Type: String}})
+	if _, err := viaPacked.InsertColumns([]ColumnData{{Blob: blob, Offsets: offsets}}); err != nil {
+		t.Fatalf("InsertColumns: %v", err)
+	}
+
+	a, _ := viaStrings.DictSince(0, 0)
+	b, _ := viaPacked.DictSince(0, 0)
+	if !equalStrings(a, b) {
+		t.Fatalf("dictionaries differ: %v vs %v", a, b)
+	}
+	if !equalI32(viaStrings.View(0, 5).Cols[0].I32, viaPacked.View(0, 5).Cols[0].I32) {
+		t.Fatal("ids differ between the string and packed insert paths")
+	}
+}
+
+func TestPackedInsertRejectsBadOffsets(t *testing.T) {
+	cases := []struct {
+		name    string
+		blob    []byte
+		offsets []int32
+	}{
+		{"last offset past the blob", []byte("ab"), []int32{0, 99}},
+		{"first offset past the blob", []byte("ab"), []int32{99, 99}},
+		{"offsets run backwards", []byte("abcd"), []int32{0, 3, 1}},
+		{"negative first offset", []byte("ab"), []int32{-1, 2}},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tbl := newTestTable(t, Schema{{Name: "s", Type: String}})
+			if _, err := tbl.InsertColumns([]ColumnData{
+				{Blob: tc.blob, Offsets: tc.offsets},
+			}); !errors.Is(err, ErrRowCount) {
+				t.Fatalf("InsertColumns = %v, want ErrRowCount", err)
+			}
+			if tbl.RowCount() != 0 {
+				t.Fatal("a rejected insert wrote rows")
+			}
+		})
+	}
+}

@@ -490,3 +490,200 @@ func TestRevisionOnlyMovesOnSuccess(t *testing.T) {
 		})
 	}
 }
+
+/* ------------------------------------------------------------------ */
+/* Revision wrapping                                                   */
+/* ------------------------------------------------------------------ */
+
+func TestNextRevisionStaysInsideThirtyOneBits(t *testing.T) {
+	cases := []struct {
+		name string
+		from uint32
+		want uint32
+	}{
+		{"from zero", 0, 1},
+		{"ordinary", 41, 42},
+		{"one below the top", revisionMask - 1, revisionMask},
+		// The value crosses to JS as an int32, where a negative number is a
+		// status code. Wrapping here is what keeps it from ever looking
+		// like one.
+		{"at the top, wraps to zero", revisionMask, 0},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := nextRevision(tc.from); got != tc.want {
+				t.Fatalf("nextRevision(%d) = %d, want %d", tc.from, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRevisionIsNeverNegativeAsInt32(t *testing.T) {
+	r := uint32(0)
+	// Walk the wrap point rather than two billion mutations.
+	for _, start := range []uint32{0, revisionMask - 3, revisionMask} {
+		r = start
+		for i := 0; i < 8; i++ {
+			r = nextRevision(r)
+			if int32(r) < 0 {
+				t.Fatalf("revision %d reads as %d, which collides with a status code", r, int32(r))
+			}
+			if r > revisionMask {
+				t.Fatalf("revision %d is outside 31 bits", r)
+			}
+		}
+	}
+}
+
+func TestRevisionWrapsAroundInPractice(t *testing.T) {
+	tbl := fourRows(t)
+	// Park the counter one short of the wrap, then mutate across it.
+	tbl.revision = revisionMask
+	if err := tbl.SetI32(0, 0, 1); err != nil {
+		t.Fatalf("SetI32: %v", err)
+	}
+	if got := tbl.Revision(); got != 0 {
+		t.Fatalf("Revision() = %d, want 0 after wrapping", got)
+	}
+	if err := tbl.SetI32(0, 0, 2); err != nil {
+		t.Fatalf("SetI32: %v", err)
+	}
+	if got := tbl.Revision(); got != 1 {
+		t.Fatalf("Revision() = %d, want 1", got)
+	}
+}
+
+/* ------------------------------------------------------------------ */
+/* Order rebuilds                                                      */
+/* ------------------------------------------------------------------ */
+
+func TestSetCellSkipsTheOrderRebuild(t *testing.T) {
+	tbl := fourRows(t)
+
+	// Scribble on the order. With no sort or filter spec the order depends
+	// only on which rows are live, so a cell edit must leave it alone and
+	// the scribble has to survive. At 200k rows that rebuild was the entire
+	// cost of a SetCell.
+	scribble := func() { tbl.order[0] = 99 }
+	scribbled := func() bool { return tbl.order[0] == 99 }
+
+	edits := map[string]func() error{
+		"SetI32":    func() error { return tbl.SetI32(1, 0, 7) },
+		"SetF64":    func() error { return tbl.SetF64(1, 1, 7) },
+		"SetString": func() error { return tbl.SetString(1, 2, "x") },
+		"SetStringBytes": func() error {
+			return tbl.SetStringBytes(1, 2, []byte("y"))
+		},
+	}
+
+	for name, edit := range edits {
+		t.Run(name, func(t *testing.T) {
+			scribble()
+			before := tbl.Revision()
+			if err := edit(); err != nil {
+				t.Fatalf("%s: %v", name, err)
+			}
+			if !scribbled() {
+				t.Fatalf("%s rebuilt the order", name)
+			}
+			// The revision still moves: the cell did change.
+			if tbl.Revision() == before {
+				t.Fatalf("%s did not bump the revision", name)
+			}
+		})
+	}
+}
+
+func TestInsertAndDeleteStillRebuildTheOrder(t *testing.T) {
+	t.Run("delete", func(t *testing.T) {
+		tbl := fourRows(t)
+		tbl.order[0] = 99
+		if err := tbl.DeleteRows([]int32{2}); err != nil {
+			t.Fatalf("DeleteRows: %v", err)
+		}
+		if !equalI32(tbl.order, []int32{0, 1, 3}) {
+			t.Fatalf("order = %v, want [0 1 3]: a delete must rebuild", tbl.order)
+		}
+	})
+
+	t.Run("insert", func(t *testing.T) {
+		tbl := fourRows(t)
+		tbl.order[0] = 99
+		if _, err := tbl.InsertColumns([]ColumnData{
+			{I32: []int32{50}}, {F64: []float64{5.5}}, {Strings: []string{"new"}},
+		}); err != nil {
+			t.Fatalf("InsertColumns: %v", err)
+		}
+		if !equalI32(tbl.order, []int32{0, 1, 2, 3, 4}) {
+			t.Fatalf("order = %v, want [0 1 2 3 4]: an insert must rebuild", tbl.order)
+		}
+	})
+
+	t.Run("a rejected mutation changes nothing", func(t *testing.T) {
+		tbl := fourRows(t)
+		tbl.order[0] = 99
+		if err := tbl.SetI32(999, 0, 1); err == nil {
+			t.Fatal("expected an error")
+		}
+		if tbl.order[0] != 99 {
+			t.Fatal("a rejected edit rebuilt the order")
+		}
+	})
+}
+
+/* ------------------------------------------------------------------ */
+/* Allocation                                                          */
+/* ------------------------------------------------------------------ */
+
+func TestRepeatedWorkAllocatesNothing(t *testing.T) {
+	tbl := seeded(t,
+		[]int32{1, 2, 3, 4},
+		[]float64{1, 2, 3, 4},
+		[]string{"new", "shipped", "new", "held"},
+	)
+	existing := []byte("shipped")
+
+	// The steady state: cells set to values the column already holds, over
+	// and over. Nothing here is new data, so nothing may reach the heap.
+	allocs := testing.AllocsPerRun(200, func() {
+		_ = tbl.SetI32(0, 0, 7)
+		_ = tbl.SetF64(0, 1, 7)
+		_ = tbl.SetStringBytes(0, 2, existing)
+	})
+	if allocs != 0 {
+		t.Fatalf("allocated %v times per run, want 0", allocs)
+	}
+}
+
+func TestInsertGrowsEachColumnOnce(t *testing.T) {
+	tbl := newTestTable(t, testSchema())
+
+	const n = 1000
+	ids := make([]int32, n)
+	prices := make([]float64, n)
+	statuses := make([]string, n)
+	for i := range ids {
+		ids[i] = int32(i)
+		prices[i] = float64(i)
+		statuses[i] = "s"
+	}
+
+	if _, err := tbl.InsertColumns([]ColumnData{
+		{I32: ids}, {F64: prices}, {Strings: statuses},
+	}); err != nil {
+		t.Fatalf("InsertColumns: %v", err)
+	}
+
+	// Sized to the rows held, with nothing spare: append's geometric growth
+	// would leave up to twice this behind for the collector.
+	if got := cap(tbl.cols[0].i32); got != n {
+		t.Errorf("i32 column capacity = %d, want exactly %d", got, n)
+	}
+	if got := cap(tbl.cols[1].f64); got != n {
+		t.Errorf("f64 column capacity = %d, want exactly %d", got, n)
+	}
+	if got := cap(tbl.cols[2].i32); got != n {
+		t.Errorf("string column capacity = %d, want exactly %d", got, n)
+	}
+}

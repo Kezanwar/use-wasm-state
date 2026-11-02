@@ -10,6 +10,7 @@
  */
 
 import type { WasmAllocator } from "../internal/wasm/memory";
+import type { InputHost } from "./input";
 
 /* ------------------------------------------------------------------ */
 /* Status codes                                                        */
@@ -109,7 +110,7 @@ export function encodeSchema(columns: readonly ColumnSpec[]): Uint8Array {
 /* Views                                                               */
 /* ------------------------------------------------------------------ */
 
-/** u32 row count, u32 reserved. The reserved word is alignment padding. */
+/** u32 row count, u32 clamped start row. */
 export const VIEW_HEADER_SIZE = 8;
 
 const alignUp = (n: number) => (n + 7) & ~7;
@@ -138,6 +139,14 @@ export function viewOffsets(
 }
 
 export interface DecodedView {
+  /**
+   * Where the window actually begins, after clamping.
+   *
+   * Not necessarily the start that was asked for: a grid mid-scroll asks
+   * for rows that have just stopped existing. Line the rows up against
+   * this, not against the request.
+   */
+  start: number;
   /** Row ids, in display order. React's keys, and what edits take. */
   ids: Int32Array;
   /**
@@ -158,6 +167,7 @@ export interface DecodedView {
 export function decodeView(bytes: Uint8Array, schema: readonly ColumnSpec[]): DecodedView {
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const n = dv.getUint32(0, true);
+  const start = dv.getUint32(4, true);
   const { offsets } = viewOffsets(schema, n);
 
   const ids = readI32(bytes, offsets[0]!, n);
@@ -167,7 +177,7 @@ export function decodeView(bytes: Uint8Array, schema: readonly ColumnSpec[]): De
       : readI32(bytes, offsets[i + 1]!, n)
   );
 
-  return { ids, columns };
+  return { start, ids, columns };
 }
 
 /**
@@ -233,6 +243,10 @@ export function encodeStrings(values: readonly string[]): {
  *
  * Dictionaries are append-only, so this is always a delta to push onto the
  * end of a mirror, never a replacement for one.
+ *
+ * The buffer belongs to the engine and the next dictSince call overwrites
+ * it, so the strings are decoded out of it here and nothing is held. Never
+ * free it.
  */
 export function decodeDict(bytes: Uint8Array): string[] {
   const dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
@@ -259,10 +273,25 @@ export function decodeDict(bytes: Uint8Array): string[] {
  * throwing: a trap would take the whole module down, and a grid asking for
  * a row that just got deleted is ordinary, not exceptional.
  */
-export interface EngineExports extends WasmAllocator {
-  /** Reserve `size` bytes, 8-byte aligned. Returns 0 if size <= 0. */
+export interface EngineExports extends WasmAllocator, InputHost {
+  /**
+   * The engine's own argument buffer, at least minBytes and 8-byte
+   * aligned. Returns 0 for a non-positive size.
+   *
+   * This is how arguments get in; see withInput in ./input. Contents live
+   * until the next call, growing moves it, and JS never frees it.
+   */
+  inputBuffer(minBytes: number): number;
+
+  /**
+   * Reserve `size` bytes with a lifetime of its own, 8-byte aligned.
+   *
+   * Still exported for callers that genuinely need that, but nothing in
+   * this package uses it per operation: on the Go heap under a collector
+   * the engine is trying to keep idle, inputBuffer is the path.
+   */
   alloc(size: number): number;
-  /** Release a block from alloc. Never pass it a view pointer. */
+  /** Release a block from alloc. Never pass it a view or input pointer. */
   free(ptr: number): void;
 
   /** Returns a handle, or a negative status. */
@@ -297,15 +326,16 @@ export interface EngineExports extends WasmAllocator {
   view(handle: number, start: number, count: number): bigint;
 
   /**
-   * Packed (ptr << 32 | len) into a freshly allocated buffer holding the
-   * dictionary entries added since `from`. Zero on failure. The caller
-   * frees it.
+   * Packed (ptr << 32 | len) into a buffer the engine owns and reuses,
+   * holding the dictionary entries added since `from`. Zero on failure.
+   * Copy out of it before the next dictSince call, and never free it.
    */
   dictSince(handle: number, col: number, from: number): bigint;
 }
 
 /** Every export this package requires of a module, for an audit or a test. */
 export const ENGINE_EXPORTS = [
+  "inputBuffer",
   "alloc",
   "free",
   "createTable",

@@ -9,6 +9,7 @@
 
 /** Everything main.go marks //go:wasmexport, in declaration order. */
 export const ABI_EXPORTS = [
+  "inputBuffer",
   "alloc",
   "free",
   "createTable",

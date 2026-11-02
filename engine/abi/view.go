@@ -40,27 +40,27 @@ func ViewOffsets(s table.Schema, n int32, dst []int) int {
 	return off
 }
 
-// viewState is the single buffer every view is written into, plus the
-// scratch the encoder reuses.
+// viewState is the buffer every view is written into, plus the typed
+// scratch the encoder gathers through.
 //
-// One buffer for the life of the module, grown and never shrunk. Scrolling a
-// 200k-row grid is the hot path the whole design exists for, and it has to
-// cost no allocation at all; the price is that a view is only valid until
-// the next one, which the JS side is told in as many words.
+// Scrolling a 200k-row grid is the hot path the whole design exists for, so
+// after the first call of a given size it must cost no allocation at all.
+// The price is that a view is only valid until the next one, which the JS
+// side is told in as many words.
 var viewState struct {
-	buf     []byte
+	out     scratch
 	ids     []int32
 	i32     []int32
 	f64     []float64
 	offsets []int
 }
 
-// ViewBuffer returns the current buffer, for tests that want to watch it
-// grow or stay put.
-func ViewBuffer() []byte { return viewState.buf }
+// ViewCapacity is the bytes the view buffer has reserved. Tests watch it to
+// tell a reuse from a regrow.
+func ViewCapacity() int { return viewState.out.capacity() }
 
 // ResetViewBuffer drops the buffer. For tests; the module never does this.
-func ResetViewBuffer() { viewState.buf = nil }
+func ResetViewBuffer() { viewState.out.buf = nil }
 
 // EncodeView writes one window of a table into the shared buffer and returns
 // the bytes written.
@@ -73,7 +73,7 @@ func ResetViewBuffer() { viewState.buf = nil }
 // resolves against the mirror it builds from dictSince.
 func EncodeView(t *table.Table, start, count int32) []byte {
 	s := t.Schema()
-	_, n := t.Window(start, count)
+	clampedStart, n := t.Window(start, count)
 
 	if cap(viewState.offsets) < len(s)+1 {
 		viewState.offsets = make([]int, len(s)+1)
@@ -81,9 +81,13 @@ func EncodeView(t *table.Table, start, count int32) []byte {
 	offs := viewState.offsets[:len(s)+1]
 	size := ViewOffsets(s, n, offs)
 
-	buf := growAligned(&viewState.buf, size)
+	buf := viewState.out.ensure(size)
 	binary.LittleEndian.PutUint32(buf, uint32(n))
-	binary.LittleEndian.PutUint32(buf[4:], 0)
+	// The window the caller asked for may not be the one it got: a grid
+	// mid-scroll asks for rows that have just stopped existing. Reporting
+	// where the window actually begins is the only way JS can line the rows
+	// up with its scroll position.
+	binary.LittleEndian.PutUint32(buf[4:], uint32(clampedStart))
 
 	if cap(viewState.ids) < int(n) {
 		viewState.ids = make([]int32, n)
@@ -125,21 +129,4 @@ func EncodeView(t *table.Table, start, count int32) []byte {
 	}
 
 	return buf
-}
-
-// growAligned returns a slice of exactly size bytes whose first byte sits on
-// an 8-byte boundary, reusing *b when it is already big enough.
-//
-// Alignment has to hold for the address in linear memory, not just the
-// offset inside the buffer, because JS indexes Float64Array off
-// memory.buffer itself. Go only guarantees pointer alignment, so the block
-// is over-allocated and the start pushed up.
-func growAligned(b *[]byte, size int) []byte {
-	if cap(*b) >= size {
-		return (*b)[:size]
-	}
-	raw := make([]byte, size+7)
-	pad := alignPad(raw)
-	*b = raw[pad : pad+size : pad+size]
-	return *b
 }

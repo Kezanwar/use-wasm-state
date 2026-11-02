@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { vi } from "vitest";
 import { instantiateModule } from "../../src/internal/wasm/loader";
-import { bytesVal, unpack } from "../../src/internal/wasm/memory";
+import { unpack } from "../../src/internal/wasm/memory";
 import {
   ColumnType,
   decodeDict,
@@ -13,14 +13,16 @@ import {
   type DecodedView,
   type EngineExports,
 } from "../../src/engine/abi";
+import { bytesIn, f64In, i32In, stringIn, u32In, withInput } from "../../src/engine/input";
 
 /**
  * Harness for driving the real engine.wasm from Node.
  *
  * Everything here does what src/engine/sync-client.ts will do in build step
- * 5: allocate, write, call, read back, free. Keeping it in the tests first
- * means the client is written against an ABI that has already been proven,
- * rather than the two being debugged at once.
+ * 5. In particular it goes through withInput for every call that passes
+ * data in, and never calls alloc or free: that is the memory model the
+ * engine is built around, so the tests have to exercise it rather than a
+ * friendlier path of their own.
  */
 
 const ENGINE_URL = "https://engine.test/engine.wasm";
@@ -49,38 +51,12 @@ export async function newEngine(): Promise<EngineExports> {
 export const ENGINE_BYTE_SIZE = readFileSync(ENGINE_PATH).byteLength;
 
 /* ------------------------------------------------------------------ */
-/* Memory                                                              */
-/* ------------------------------------------------------------------ */
-
-/**
- * Copy bytes into a fresh wasm allocation and return the offset.
- *
- * The view over memory.buffer is taken *after* alloc, every time. A large
- * alloc can grow linear memory, and a grow detaches every view taken before
- * it; caching one anywhere is the bug this whole layer has to avoid.
- */
-export function writeBytes(e: EngineExports, data: Uint8Array): number {
-  if (data.byteLength === 0) return 0;
-  const ptr = e.alloc(data.byteLength);
-  new Uint8Array(e.memory.buffer).set(data, ptr);
-  return ptr;
-}
-
-const asBytes = (a: Int32Array | Float64Array | Uint32Array) =>
-  new Uint8Array(a.buffer, a.byteOffset, a.byteLength);
-
-/* ------------------------------------------------------------------ */
 /* Calls                                                               */
 /* ------------------------------------------------------------------ */
 
 export function createTable(e: EngineExports, schema: readonly ColumnSpec[]): number {
   const bytes = encodeSchema(schema);
-  const ptr = writeBytes(e, bytes);
-  try {
-    return e.createTable(ptr, bytes.byteLength);
-  } finally {
-    e.free(ptr);
-  }
+  return withInput(e, [bytesIn(bytes)], ([s]) => e.createTable(s.ptr, s.len));
 }
 
 export type ColumnInput =
@@ -89,57 +65,51 @@ export type ColumnInput =
   | { type: typeof ColumnType.String; values: readonly string[] };
 
 /**
- * Build one descriptor per column and make a single insertColumns call.
+ * Append rows: one descriptor per column, and a single insertColumns call.
  *
- * JS owns every buffer here and frees all of them on the way out, including
- * when the call fails: the engine copies what it keeps.
+ * Every buffer lands in the input buffer in one withInput, which matters
+ * more here than anywhere else. The descriptors hold offsets into the other
+ * blocks, so if the buffer could grow between writing a column and writing
+ * the descriptor that points at it, the descriptor would carry a stale
+ * offset. Sizing everything up front is what makes that impossible.
  */
 export function insertColumns(
   e: EngineExports,
   handle: number,
   columns: readonly ColumnInput[]
 ): number {
-  const owned: number[] = [];
-  const descs = new Uint32Array(columns.length * 4);
+  const args = [];
+  // Which block index holds each column's data, and its offsets if it has
+  // any. Filled as the args are built, read once the blocks exist.
+  const layout: Array<{ data: number; offsets: number; rows: number }> = [];
 
-  const keep = (ptr: number) => {
-    if (ptr !== 0) owned.push(ptr);
-    return ptr;
-  };
-
-  try {
-    columns.forEach((column, i) => {
-      if (column.type === ColumnType.String) {
-        const { blob, offsets } = encodeStrings(column.values);
-        const blobPtr = keep(writeBytes(e, blob));
-        const offsetsPtr = keep(writeBytes(e, asBytes(offsets)));
-        descs.set([blobPtr, blob.byteLength, offsetsPtr, column.values.length], i * 4);
-        return;
-      }
-
-      const typed =
-        column.type === ColumnType.F64
-          ? Float64Array.from(column.values)
-          : Int32Array.from(column.values);
-      const ptr = keep(writeBytes(e, asBytes(typed)));
-      descs.set([ptr, typed.length, 0, typed.length], i * 4);
-    });
-
-    const descPtr = keep(writeBytes(e, asBytes(descs)));
-    return e.insertColumns(handle, descPtr, columns.length);
-  } finally {
-    for (const ptr of owned) e.free(ptr);
+  for (const column of columns) {
+    if (column.type === ColumnType.String) {
+      const { blob, offsets } = encodeStrings(column.values);
+      layout.push({ data: args.length, offsets: args.length + 1, rows: column.values.length });
+      args.push(bytesIn(blob), u32In(offsets));
+      continue;
+    }
+    layout.push({ data: args.length, offsets: -1, rows: column.values.length });
+    args.push(column.type === ColumnType.F64 ? f64In(column.values) : i32In(column.values));
   }
+
+  const descIndex = args.length;
+  args.push(u32In(new Uint32Array(columns.length * 4)));
+
+  return withInput(e, args, (blocks) => {
+    const descs = new Uint32Array(e.memory.buffer, blocks[descIndex]!.ptr, columns.length * 4);
+    columns.forEach((_column, i) => {
+      const { data, offsets, rows } = layout[i]!;
+      const d = blocks[data]!;
+      descs.set([d.ptr, d.len, offsets === -1 ? 0 : blocks[offsets]!.ptr, rows], i * 4);
+    });
+    return e.insertColumns(handle, blocks[descIndex]!.ptr, columns.length);
+  });
 }
 
 export function deleteRows(e: EngineExports, handle: number, ids: ArrayLike<number>): number {
-  const typed = Int32Array.from(ids);
-  const ptr = writeBytes(e, asBytes(typed));
-  try {
-    return e.deleteRows(handle, ptr, typed.length);
-  } finally {
-    if (ptr !== 0) e.free(ptr);
-  }
+  return withInput(e, [i32In(ids)], ([block]) => e.deleteRows(handle, block.ptr, block.len));
 }
 
 export function setCellString(
@@ -149,13 +119,9 @@ export function setCellString(
   col: number,
   value: string
 ): number {
-  const bytes = new TextEncoder().encode(value);
-  const ptr = writeBytes(e, bytes);
-  try {
-    return e.setCellString(handle, row, col, ptr, bytes.byteLength);
-  } finally {
-    if (ptr !== 0) e.free(ptr);
-  }
+  return withInput(e, [stringIn(value)], ([text]) =>
+    e.setCellString(handle, row, col, text.ptr, text.len)
+  );
 }
 
 /* ------------------------------------------------------------------ */
@@ -170,6 +136,16 @@ export function viewPacked(
   count: number
 ): { ptr: number; len: number } | null {
   const packed = e.view(handle, start, count);
+  return packed === 0n ? null : unpack(packed);
+}
+
+export function dictPacked(
+  e: EngineExports,
+  handle: number,
+  col: number,
+  from: number
+): { ptr: number; len: number } | null {
+  const packed = e.dictSince(handle, col, from);
   return packed === 0n ? null : unpack(packed);
 }
 
@@ -188,19 +164,20 @@ export function readView(
 ): DecodedView | null {
   const window = viewPacked(e, handle, start, count);
   if (!window) return null;
-  const bytes = new Uint8Array(e.memory.buffer, window.ptr, window.len);
-  return decodeView(bytes, schema);
+  return decodeView(new Uint8Array(e.memory.buffer, window.ptr, window.len), schema);
 }
 
-/** Read a dictionary delta. bytesVal copies it out and frees it. */
+/**
+ * Read a dictionary delta. decodeDict builds the strings out of the
+ * engine's buffer; nothing is freed, and the buffer is reused next call.
+ */
 export function readDictSince(
   e: EngineExports,
   handle: number,
   col: number,
   from: number
 ): string[] | null {
-  const packed = e.dictSince(handle, col, from);
-  if (packed === 0n) return null;
-  const bytes = bytesVal(e, packed);
-  return bytes === null ? null : decodeDict(bytes);
+  const window = dictPacked(e, handle, col, from);
+  if (!window) return null;
+  return decodeDict(new Uint8Array(e.memory.buffer, window.ptr, window.len));
 }

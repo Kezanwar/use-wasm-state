@@ -12,10 +12,16 @@ type column struct {
 
 // orderSpec is the stored sort/filter/search state.
 //
-// Empty in v1, on purpose. rebuildOrder already runs at the end of every
-// mutation and already reads this field, so step 7 adds sorting by filling
+// Empty in v1, on purpose. The order is already rebuilt from it after any
+// mutation that could change the result, so step 7 adds sorting by filling
 // the struct in rather than by threading a new call through every mutation.
 type orderSpec struct{}
+
+// empty reports whether the order is just the live rows in id order. While
+// that holds, a cell edit cannot change the order and the rebuild is
+// skipped; see bumpValues. Constant today, which lets the compiler drop the
+// check entirely.
+func (o orderSpec) empty() bool { return true }
 
 // Table is a columnar store with stable row ids.
 //
@@ -40,14 +46,42 @@ type Table struct {
 	revision uint32
 }
 
+// revisionMask keeps the revision inside 31 bits.
+//
+// It crosses to JS as an int32, where every export that can fail returns a
+// small negative status. A counter allowed to reach the top bit would come
+// back negative and be read as one of those. Wrapping a bit early costs
+// nothing: the value only has to differ from the one before it.
+const revisionMask uint32 = 0x7fffffff
+
+func nextRevision(r uint32) uint32 { return (r + 1) & revisionMask }
+
 // ColumnData carries one column's worth of new rows for InsertColumns.
-// Exactly one field is set, matching that column's type. Strings arrive as
-// strings here and are interned on the way in; the caller never sees an id.
+// Exactly one field is set, matching that column's type. Strings are
+// interned on the way in; the caller never sees an id.
+//
+// A string column takes either Strings or the packed pair, not both.
 type ColumnData struct {
 	I32     []int32
 	F64     []float64
 	Strings []string
+
+	// Blob and Offsets are the packed form of Strings: one UTF-8 run plus
+	// rowCount+1 byte offsets into it, so row i is
+	// Blob[Offsets[i]:Offsets[i+1]].
+	//
+	// This is the form rows arrive in from JS, and the form that keeps the
+	// engine quiet: interning straight from the bytes allocates only for a
+	// value the column has never held, where building a Go string per row
+	// would allocate 200k times to keep six of them.
+	Blob    []byte
+	Offsets []int32
 }
+
+// packed reports whether a string column was given in the packed form.
+// Offsets always has one more entry than there are rows, so a non-nil
+// Offsets is unambiguous even for an insert of no rows.
+func (d *ColumnData) packed() bool { return d.Offsets != nil }
 
 func newTable(s Schema) *Table {
 	t := &Table{schema: s.clone()}
@@ -138,41 +172,52 @@ func (t *Table) InsertColumns(data []ColumnData) (firstRowID int32, err error) {
 		if columnLen(&data[i], t.cols[i].typ) != n {
 			return 0, ErrRowCount
 		}
+		if t.cols[i].typ == String && data[i].packed() {
+			if err := checkOffsets(&data[i]); err != nil {
+				return 0, err
+			}
+		}
 	}
 	if n == 0 {
 		return t.rows, nil
 	}
 
 	first := t.rows
+	total := t.rows + n
+
 	for i := range t.cols {
 		c := &t.cols[i]
 		switch c.typ {
 		case I32:
-			c.i32 = append(c.i32, data[i].I32...)
+			c.i32 = growI32(c.i32, total)
+			copy(c.i32[first:], data[i].I32)
 		case F64:
-			c.f64 = append(c.f64, data[i].F64...)
+			c.f64 = growF64(c.f64, total)
+			copy(c.f64[first:], data[i].F64)
 		case String:
-			// Interning is the expensive part of a large insert: one map
-			// lookup per cell. It buys a column that is four bytes a row
-			// however long the strings are, and a dictionary JS fetches
-			// once instead of a string per cell per frame.
-			src := data[i].Strings
-			ids := c.i32
-			if cap(ids)-len(ids) < len(src) {
-				grown := make([]int32, len(ids), len(ids)+len(src))
-				copy(grown, ids)
-				ids = grown
+			// Interning is the expensive part of a large insert: one hash
+			// and one comparison per cell. It buys a column that is four
+			// bytes a row however long the strings are, and a dictionary JS
+			// fetches once instead of a string per cell per frame.
+			c.dict.sizeHint(n)
+			c.i32 = growI32(c.i32, total)
+			ids := c.i32[first:]
+			if data[i].packed() {
+				blob, offs := data[i].Blob, data[i].Offsets
+				for j := int32(0); j < n; j++ {
+					ids[j] = c.dict.internBytes(blob[offs[j]:offs[j+1]])
+				}
+			} else {
+				for j, v := range data[i].Strings {
+					ids[j] = c.dict.intern(v)
+				}
 			}
-			for j := range src {
-				ids = append(ids, c.dict.intern(src[j]))
-			}
-			c.i32 = ids
 		}
 	}
 
 	t.rows += n
 	t.deleted.grow(t.rows)
-	t.bump()
+	t.bumpLiveness()
 	return first, nil
 }
 
@@ -186,9 +231,58 @@ func columnLen(d *ColumnData, typ ColumnType) int32 {
 	case F64:
 		return int32(len(d.F64))
 	case String:
+		if d.packed() {
+			return int32(len(d.Offsets)) - 1
+		}
 		return int32(len(d.Strings))
 	}
 	return 0
+}
+
+// checkOffsets validates a packed string column before anything is written.
+// Offsets must run forwards and stay inside the blob; otherwise the insert
+// would read whatever happens to follow it in memory.
+func checkOffsets(d *ColumnData) error {
+	offs := d.Offsets
+	prev := int32(0)
+	if len(offs) > 0 {
+		prev = offs[0]
+	}
+	if prev < 0 || int(prev) > len(d.Blob) {
+		return ErrRowCount
+	}
+	for i := 1; i < len(offs); i++ {
+		if offs[i] < prev || int(offs[i]) > len(d.Blob) {
+			return ErrRowCount
+		}
+		prev = offs[i]
+	}
+	return nil
+}
+
+// growI32 and growF64 resize a column to exactly n elements in one
+// allocation.
+//
+// Not append: append grows geometrically, so loading a dataset in a few
+// calls reallocates several times and leaves spare capacity behind. Sizing
+// to the final length means one allocation per column per insert, and under
+// this collector an allocation avoided is work the GC never has to do.
+func growI32(s []int32, n int32) []int32 {
+	if int32(cap(s)) >= n {
+		return s[:n]
+	}
+	out := make([]int32, n)
+	copy(out, s)
+	return out
+}
+
+func growF64(s []float64, n int32) []float64 {
+	if int32(cap(s)) >= n {
+		return s[:n]
+	}
+	out := make([]float64, n)
+	copy(out, s)
+	return out
 }
 
 // SetI32 writes one cell of an i32 column.
@@ -201,7 +295,7 @@ func (t *Table) SetI32(rowID, col int32, v int32) error {
 		return err
 	}
 	c.i32[rowID] = v
-	t.bump()
+	t.bumpValues()
 	return nil
 }
 
@@ -215,7 +309,7 @@ func (t *Table) SetF64(rowID, col int32, v float64) error {
 		return err
 	}
 	c.f64[rowID] = v
-	t.bump()
+	t.bumpValues()
 	return nil
 }
 
@@ -232,7 +326,26 @@ func (t *Table) SetString(rowID, col int32, v string) error {
 		return err
 	}
 	c.i32[rowID] = c.dict.intern(v)
-	t.bump()
+	t.bumpValues()
+	return nil
+}
+
+// SetStringBytes is SetString for a value that is still UTF-8 bytes.
+//
+// What the ABI calls: the value is sitting in the input buffer, and turning
+// it into a Go string first would allocate on every keystroke even when the
+// column already holds that exact value. Only a value the column has never
+// seen reaches the heap.
+func (t *Table) SetStringBytes(rowID, col int32, v []byte) error {
+	if err := t.liveRow(rowID); err != nil {
+		return err
+	}
+	c, err := t.columnOf(col, String)
+	if err != nil {
+		return err
+	}
+	c.i32[rowID] = c.dict.internBytes(v)
+	t.bumpValues()
 	return nil
 }
 
@@ -256,7 +369,7 @@ func (t *Table) DeleteRows(rowIDs []int32) error {
 	for _, id := range rowIDs {
 		t.deleted.set(id)
 	}
-	t.bump()
+	t.bumpLiveness()
 	return nil
 }
 
@@ -264,10 +377,27 @@ func (t *Table) DeleteRows(rowIDs []int32) error {
 /* Order                                                               */
 /* ------------------------------------------------------------------ */
 
-// bump ends every successful mutation: advance the revision, then rebuild
-// the order the new revision describes.
-func (t *Table) bump() {
-	t.revision++
+// bumpValues ends a mutation that changed cell values but not which rows
+// are live.
+//
+// With no sort or filter spec the order is just the live rows in id order,
+// so editing a cell cannot move anything and the rebuild is skipped. At
+// 200k rows that rebuild was the entire cost of a SetCell.
+//
+// Step 7: once orderSpec can hold a sort, filter or search, this has to
+// rebuild whenever the edited column appears in the spec, because the row
+// can then move or drop out of the result.
+func (t *Table) bumpValues() {
+	t.revision = nextRevision(t.revision)
+	if !t.spec.empty() {
+		t.rebuildOrder()
+	}
+}
+
+// bumpLiveness ends a mutation that changed which rows exist. The order is
+// derived from liveness, so it always has to be rebuilt.
+func (t *Table) bumpLiveness() {
+	t.revision = nextRevision(t.revision)
 	t.rebuildOrder()
 }
 

@@ -50,7 +50,7 @@ describe.skipIf(!built)("dist", () => {
     // They are react-use-wasm's API, copied in. Re-exporting them would
     // make a second copy of it something this package has to support.
     const types = readFileSync(dist("index.d.ts"), "utf8");
-    for (const name of ["withScope", "loadModule", "WASM_WORKER_SOURCE"]) {
+    for (const name of ["unpack", "loadModule", "WASM_WORKER_SOURCE", "withInput"]) {
       expect(types, name).not.toContain(name);
     }
   });

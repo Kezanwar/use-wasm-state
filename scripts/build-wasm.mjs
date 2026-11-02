@@ -14,19 +14,21 @@
  * inspect-wasm.mjs checks, and it is why the engine can run identically on
  * the main thread, in a worker, and in Node under vitest.
  *
- * -gc=leaking is this target's default, pinned here so a TinyGo upgrade
- * cannot change it silently. It never reclaims anything, which is a real
- * limitation: the engine allocates per call, so linear memory doubles every
- * so many inserts and never comes back down (measured: 32MB after 400k rows
- * arriving in batches).
+ * -gc=precise is chosen over this target's default, which is `leaking`: a
+ * collector that never reclaims anything, so a long-lived table only ever
+ * grows. Measured over 400k rows arriving in batches, leaking reached 32MB
+ * of linear memory where precise held at 16MB, and a 200k-row insert costs
+ * 18ms against leaking's 13ms. Ten kilobytes of module size and 1.4x on the
+ * one bulk call buys memory that comes back.
  *
- * -gc=conservative fixes that, and was measured and rejected. It holds
- * memory flat but takes a 200k-row insertColumns from 11ms to 1,700ms,
- * because every allocation may trigger a scan of a heap that is growing
- * into the megabytes. A 156x regression on the one call the flagship demo
- * makes is worse than the leak. Revisit when TinyGo's wasm GC improves, or
- * when the engine stops allocating per row; benchmark with
- * scripts/bench-engine.mjs before changing this.
+ * -gc=conservative was measured and rejected: same flat memory, but a 200k
+ * insert takes 1,700ms, because every allocation may scan a heap growing
+ * into the megabytes.
+ *
+ * The engine is built to allocate almost nothing in steady state (see
+ * "Memory model" in the architecture notes), so the collector should have
+ * little to do between loads. Re-measure with scripts/bench-engine.mjs
+ * before changing this.
  */
 import { spawnSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
@@ -53,7 +55,7 @@ mkdirSync(dirname(out), { recursive: true });
 console.log("building src/wasm/engine.wasm");
 const built = run(
   "tinygo",
-  ["build", "-target=wasm-unknown", "-gc=leaking", "-no-debug", "-o", out, "."],
+  ["build", "-target=wasm-unknown", "-gc=precise", "-no-debug", "-o", out, "."],
   {
     cwd: resolve(root, "engine"),
   }

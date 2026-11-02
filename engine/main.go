@@ -36,6 +36,32 @@ func main() {}
 /* Memory                                                              */
 /* ------------------------------------------------------------------ */
 
+// inputBuffer hands back the engine's own argument buffer, grown to at
+// least minBytes and 8-byte aligned.
+//
+// This is how arguments get in. An alloc/free pair around every call would
+// put a block on the Go heap sixty times a second, and the collector this
+// module ships with has to be given as little as possible to do. The buffer
+// belongs to the engine: JS writes into it, calls an export, and never
+// frees it.
+//
+// Contents live until the next inputBuffer call. Growing moves it, so a
+// caller sizes everything one operation needs and asks once. See withInput
+// in src/engine/input.ts.
+//
+//go:wasmexport inputBuffer
+func inputBuffer(minBytes int32) unsafe.Pointer {
+	b := abi.InputBuffer(minBytes)
+	if len(b) == 0 {
+		return nil
+	}
+	return unsafe.Pointer(&b[0])
+}
+
+// alloc and free remain for callers that genuinely need a block of their
+// own with its own lifetime. Nothing in this package's own TypeScript uses
+// them per operation; inputBuffer is that path.
+//
 //go:wasmexport alloc
 func alloc(size int32) unsafe.Pointer { return abi.Alloc(size) }
 
@@ -121,15 +147,17 @@ func insertColumns(h int32, descPtr unsafe.Pointer, colCount int32) int32 {
 		case table.F64:
 			cols[i].F64 = unsafe.Slice((*float64)(data), d.DataLen)
 		case table.String:
-			strs, err := abi.DecodeStrings(
-				bytesAt(data, int32(d.DataLen)),
-				bytesAt(ptrAt(d.OffsetsPtr), int32(d.RowCount+1)*4),
-				int32(d.RowCount),
-			)
-			if err != nil {
-				return abi.StatusOf(err)
+			// Handed over packed rather than decoded into one Go string per
+			// row. The dictionary keeps only the distinct values, so
+			// building 200k strings to keep six would be 200k allocations
+			// the engine immediately throws away. InsertColumns validates
+			// the offsets before it reads a byte of the blob.
+			offs := ptrAt(d.OffsetsPtr)
+			if !aligned(offs) {
+				return abi.StatusBadArgument
 			}
-			cols[i].Strings = strs
+			cols[i].Blob = bytesAt(data, int32(d.DataLen))
+			cols[i].Offsets = unsafe.Slice((*int32)(offs), d.RowCount+1)
 		}
 	}
 
@@ -171,7 +199,9 @@ func setCellString(h, row, col int32, ptr unsafe.Pointer, n int32) int32 {
 	if n < 0 {
 		return abi.StatusBadArgument
 	}
-	return abi.StatusOf(t.SetString(row, col, string(bytesAt(ptr, n))))
+	// SetStringBytes, not SetString: a cell set to a value the column
+	// already holds must not allocate, and this runs on every keystroke.
+	return abi.StatusOf(t.SetStringBytes(row, col, bytesAt(ptr, n)))
 }
 
 //go:wasmexport deleteRows
@@ -261,8 +291,11 @@ func view(h, start, count int32) int64 {
 	return abi.Pack(unsafe.Pointer(&b[0]), len(b))
 }
 
-// dictSince returns a packed (offset, length) to a freshly allocated buffer
-// holding the dictionary entries added since `from`. JS frees it.
+// dictSince returns a packed (offset, length) into a buffer the engine owns
+// and reuses, holding the dictionary entries added since `from`.
+//
+// Same rules as view: copy out of it before the next dictSince call, and
+// never free it.
 //
 //go:wasmexport dictSince
 func dictSince(h, col, from int32) int64 {
@@ -274,12 +307,9 @@ func dictSince(h, col, from int32) int64 {
 	if err != nil {
 		return 0
 	}
-
-	size := abi.DictSize(values)
-	ptr := abi.Alloc(int32(size))
-	if ptr == nil {
+	b := abi.EncodeDictInto(values)
+	if len(b) == 0 {
 		return 0
 	}
-	abi.EncodeDict(values, unsafe.Slice((*byte)(ptr), size))
-	return abi.Pack(ptr, size)
+	return abi.Pack(unsafe.Pointer(&b[0]), len(b))
 }
