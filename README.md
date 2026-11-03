@@ -11,25 +11,93 @@ Go, with only what React needs to render crossing back to JS.
 First structure: a table. Sort, filter, group and search 200k rows while you
 scroll.
 
-> **Status: early.** Nothing is published and the public API is empty. See
-> the build order below for where it is up to.
+> **Status: early.** Not published yet. Sync mode only; worker mode and
+> shared tables are not built. See the build order below.
 
-## How it is meant to work
+## Install
 
-```tsx
-const rows = useWasmTable(schema, { shared: "orders", mode: "worker" });
-
-rows.insertMany(data);              // loaded once
-rows.sortBy("price", "desc");       // runs in Go
-rows.filter("status", "=", "shipped");
-
-const visible = rows.view(0, 50);   // only the viewport crosses over
+```bash
+npm install use-wasm-state
 ```
 
-Go owns the domain data: rows, indexes, sort and filter state. React owns UI
-state: selection, scroll, edit buffers. Go keeps a revision counter that
-every mutation bumps, React subscribes to it with `useSyncExternalStore`, and
-a component re-reads only its own viewport.
+## A table in twenty lines
+
+```tsx
+import { defineSchema, useWasmTable, useTableView } from "use-wasm-state";
+
+const schema = defineSchema({ item: "string", qty: "i32", price: "f64" });
+
+export function Basket() {
+  const { status, table } = useWasmTable(schema, {
+    initialRows: [{ item: "Keyboard", qty: 2, price: 89 }],
+  });
+  const view = useTableView(table, 0, 50);
+
+  if (status !== "ready") return null;
+
+  return (
+    <>
+      <button onClick={() => table.insertRows([{ item: "Cable", qty: 8, price: 4.25 }])}>
+        Add
+      </button>
+      <ul>
+        {view?.rows().map((row, i) => (
+          <li key={view.ids[i]}>
+            {row.item} x{row.qty} - {row.price}
+          </li>
+        ))}
+      </ul>
+    </>
+  );
+}
+```
+
+## Why the state lives in Go
+
+Storing arbitrary JS values in wasm means serialising on every read, which
+is slower than `useState`. It only pays off when the operations on the
+state run in wasm too. So Go owns the rows, the string dictionaries and the
+row order; React owns the scroll position and the selection.
+
+A counter on the table bumps on every mutation, `useSyncExternalStore`
+watches that counter, and each component reads back only the rows it is
+showing.
+
+```tsx
+// 200,000 rows live in Go. Fifty cross to JS.
+const view = useTableView(table, Math.floor(scrollTop / 32), 50);
+
+// An edit is one call and one revision bump.
+table.setCell(rowId, "price", 12.5);
+```
+
+Row ids are permanent positions, so they are stable React keys. A delete
+writes a tombstone and nothing moves.
+
+## Sync mode
+
+The engine runs on the main thread, so a viewport is read during render and
+a mutation is visible on the next line. That is the only mode today. Worker
+mode will move the engine off the main thread behind the same API; until it
+lands, `mode: "worker"` reports a `not_implemented` error through `status`
+rather than failing quietly.
+
+## Serving engine.wasm
+
+The engine is a 38 kB module that imports nothing. It is resolved with
+`new URL("./engine.wasm", import.meta.url)`, which Vite and webpack 5 both
+understand and which keeps the streaming compile.
+
+```tsx
+useWasmTable(schema, { wasmUrl: "https://cdn.example.com/engine.wasm" });
+```
+
+The CJS build ships a shim for `import.meta.url`; if a bundler still cannot
+resolve the asset, pass `wasmUrl`.
+
+There is a [full API reference and live examples](https://kezanwar.github.io/use-wasm-state/),
+and [llm.md](./llm.md) is a compact brief to paste into a chat before asking
+an assistant for code.
 
 ## Layout
 
@@ -39,7 +107,7 @@ engine/    Go source for the bundled wasm. `table` is pure Go and tests with
 src/       the npm package: engine clients, stores, React hooks.
 test/      vitest.
 e2e/       Playwright, for the things only a browser can run.
-examples/  the Vite demo.
+examples/  the Vite docs site: getting started, live examples, API.
 scripts/   build and audit the .wasm.
 ```
 

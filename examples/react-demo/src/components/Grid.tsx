@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { cn } from "cn";
 import { useTableView, type TableStore } from "use-wasm-state";
-import { useVirtualWindow } from "@/hooks/use-virtual-window";
+import { useVirtualWindow } from "@/hooks/useVirtualWindow";
 import { formatDate, formatPrice } from "@/lib/format";
 import type { Order, schema } from "@/lib/orders";
 

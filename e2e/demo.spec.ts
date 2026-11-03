@@ -8,9 +8,9 @@ import { expect, test, type Page } from "@playwright/test";
 
 const ROWS = 200_000;
 
-/** The grid renders once the engine has loaded and the rows are in. */
+/** The grid lives in the Examples tab, and loads its rows on mount. */
 async function ready(page: Page) {
-  await page.goto("/");
+  await page.goto("/#examples");
   await expect(page.getByTestId("row-count")).toHaveText("200,000", { timeout: 60_000 });
 }
 
@@ -158,15 +158,4 @@ test("keeps its frame rate while scrolling", async ({ page }) => {
 
   // And the grid is still showing rows from where it ended up.
   await expect(page.locator('[role="row"]').first()).toBeVisible();
-});
-
-test("grid screenshot", async ({ page }, testInfo) => {
-  await ready(page);
-  await page.locator('[data-row="3"]').click();
-  await page.locator('[data-row="6"]').click({ modifiers: ["Shift"] });
-
-  const file = testInfo.outputPath("grid.png");
-  await page.screenshot({ path: file });
-  await testInfo.attach("grid", { path: file, contentType: "image/png" });
-  console.log(`screenshot: ${file}`);
 });

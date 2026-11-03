@@ -1,113 +1,106 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import { useTableStats, useWasmTable } from "use-wasm-state";
-import { Grid, selectionRange } from "@/components/grid";
-import { StatusBar } from "@/components/status-bar";
-import { Toolbar } from "@/components/toolbar";
-import { useFrameRate } from "@/hooks/use-frame-rate";
-import { generateOrders, schema } from "@/lib/orders";
+import { BookMarked, CodeXml, Puzzle, Rocket } from "lucide-react";
+import { ThemeToggle } from "@/components/ThemeToggle";
+import { CopyForLlm } from "@/components/CopyForLlm";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { Go, Wasm } from "@/components/Term";
+import { ApiPage } from "@/pages/ApiPage";
+import { ExamplesPage } from "@/pages/ExamplesPage";
+import { GettingStartedPage } from "@/pages/GettingStartedPage";
+import { Button } from "@/components/ui/button";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { useHashTab } from "@/hooks/useHashTab";
 
-const INITIAL_ROWS = 200_000;
-const APPEND_ROWS = 10_000;
+const TABS = ["start", "examples", "api"] as const;
 
 export function App() {
-  const { status, table, error } = useWasmTable(schema);
-  const stats = useTableStats(table);
-  const fps = useFrameRate();
-
-  const [selection, setSelection] = useState<{ anchor: number; focus: number } | null>(null);
-  const [lastMs, setLastMs] = useState<number | null>(null);
-  const [busy, setBusy] = useState(false);
-  const loaded = useRef(false);
-
-  /** Run a store call and report what it cost. */
-  const timed = useCallback(<T,>(run: () => T): T => {
-    const started = performance.now();
-    const result = run();
-    setLastMs(performance.now() - started);
-    return result;
-  }, []);
-
-  // The initial load. Not initialRows, because the generator is the slow
-  // part and the status bar should show the insert on its own.
-  useEffect(() => {
-    if (!table || loaded.current) return;
-    loaded.current = true;
-
-    const columns = generateOrders(INITIAL_ROWS);
-    timed(() => table.insertColumns(columns));
-  }, [table, timed]);
-
-  const append = () => {
-    if (!table) return;
-    setBusy(true);
-    const columns = generateOrders(APPEND_ROWS, table.totalRows);
-    timed(() => table.insertColumns(columns));
-    setBusy(false);
-  };
-
-  const remove = () => {
-    if (!table || !selection) return;
-    const { from, to } = selectionRange(selection);
-    // Row ids, not offsets: offsets shift when rows go, ids never do.
-    const ids = table.view(from, to - from + 1).ids;
-    timed(() => table.deleteRows(ids));
-    setSelection(null);
-  };
-
-  useEffect(() => {
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Delete" || event.key === "Backspace") {
-        if (selection && document.activeElement?.tagName !== "INPUT") {
-          event.preventDefault();
-          remove();
-        }
-      }
-    };
-    globalThis.addEventListener("keydown", onKeyDown);
-    return () => globalThis.removeEventListener("keydown", onKeyDown);
-  });
-
-  if (status === "error") {
-    return (
-      <main className="grid min-h-dvh place-items-center p-8">
-        <p className="max-w-md text-sm text-destructive" data-testid="error">
-          {error.message}
-        </p>
-      </main>
-    );
-  }
-
-  const selectedCount = selection
-    ? selectionRange(selection).to - selectionRange(selection).from + 1
-    : 0;
+  const [tab, setTab] = useHashTab(TABS, "start");
 
   return (
-    <main className="flex h-dvh flex-col">
-      <Toolbar
-        selectedCount={selectedCount}
-        onAppend={append}
-        onDelete={remove}
-        busy={busy || status !== "ready"}
-      />
+    <TooltipProvider>
+      <div className="min-h-dvh px-4 py-10">
+        <main className="mx-auto max-w-5xl space-y-6">
+          <header className="flex items-start justify-between gap-4">
+            <div>
+              <h1 className="text-3xl font-extrabold tracking-tight">
+                use-wasm-<span className="text-wasm">state</span>
+              </h1>
+              <p className="text-muted-foreground mt-1 text-sm">
+                React state that lives in a <Wasm icon /> engine written in <Go icon />.
+              </p>
+            </div>
 
-      {status === "ready" && stats ? (
-        <Grid
-          table={table}
-          rowCount={stats.rowCount}
-          selection={selection}
-          onSelectionChange={setSelection}
-          onEdit={timed}
-        />
-      ) : (
-        <div className="flex-1" />
-      )}
+            <div className="flex shrink-0 items-center gap-2">
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <CopyForLlm />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>
+                  Copy a brief about this package, written for an LLM. Paste it into a chat before
+                  asking for code.
+                </TooltipContent>
+              </Tooltip>
 
-      <StatusBar
-        rowCount={stats?.rowCount ?? 0}
-        revision={stats?.revision ?? 0}
-        fps={fps}
-        lastMs={lastMs}
-      />
-    </main>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button variant="outline" size="icon" asChild aria-label="Source on GitHub">
+                    <a
+                      href="https://github.com/Kezanwar/use-wasm-state"
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <CodeXml className="size-4" />
+                    </a>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Source on GitHub</TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <span>
+                    <ThemeToggle />
+                  </span>
+                </TooltipTrigger>
+                <TooltipContent>Switch between dark and light</TooltipContent>
+              </Tooltip>
+            </div>
+          </header>
+
+          <Tabs value={tab} onValueChange={setTab}>
+            {/*
+              Wraps rather than overflowing, for a phone. The variant class
+              has to be overridden by name: the component pins the height
+              through a group-data selector that a plain h-auto does not
+              replace.
+            */}
+            <TabsList className="h-auto flex-wrap group-data-[orientation=horizontal]/tabs:h-auto">
+              <TabsTrigger value="start" data-testid="tab-start">
+                <Rocket className="size-4" /> Getting started
+              </TabsTrigger>
+              <TabsTrigger value="examples" data-testid="tab-examples">
+                <Puzzle className="size-4" /> Examples
+              </TabsTrigger>
+              <TabsTrigger value="api" data-testid="tab-api">
+                <BookMarked className="size-4" /> API
+              </TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="start" className="mt-5">
+              <GettingStartedPage />
+            </TabsContent>
+
+            <TabsContent value="examples" className="mt-5">
+              <ExamplesPage />
+            </TabsContent>
+
+            <TabsContent value="api" className="mt-5">
+              <ApiPage />
+            </TabsContent>
+          </Tabs>
+        </main>
+      </div>
+    </TooltipProvider>
   );
 }

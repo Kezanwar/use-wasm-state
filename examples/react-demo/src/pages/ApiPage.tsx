@@ -1,0 +1,283 @@
+import type { ReactNode } from "react";
+import { HighlightedCode } from "@/components/CodeBlock";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import { API } from "@/lib/api";
+
+/**
+ * The public surface, hand-written rather than generated: the useful part
+ * of an API page is the sentence saying when to reach for each thing, and
+ * a generator cannot write that.
+ *
+ * The names live in @/lib/api so a test can hold this page against the
+ * package's own exports.
+ */
+
+function Entry({
+  name,
+  kind,
+  signature,
+  children,
+}: {
+  name: string;
+  kind: "function" | "hook" | "type" | "class";
+  signature: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="space-y-2.5" data-api={name}>
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="text-foreground font-mono text-sm font-semibold">{name}</h3>
+        <Badge variant="secondary" className="font-normal">
+          {kind}
+        </Badge>
+      </div>
+      <HighlightedCode
+        code={signature}
+        className="rounded-md border px-3 py-2 text-[12px] leading-relaxed"
+      />
+      <div className="text-muted-foreground space-y-2 text-sm">{children}</div>
+    </div>
+  );
+}
+
+function Fields({ rows }: { rows: [string, string][] }) {
+  return (
+    <table className="w-full text-sm">
+      <tbody>
+        {rows.map(([name, description]) => (
+          <tr key={name} className="border-border/50 border-t align-top">
+            <td className="text-foreground w-44 py-1.5 pr-3 font-mono text-xs">{name}</td>
+            <td className="text-muted-foreground py-1.5">{description}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
+  );
+}
+
+function Group({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-base">{title}</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-6">{children}</CardContent>
+    </Card>
+  );
+}
+
+export function ApiPage() {
+  return (
+    <div className="space-y-6">
+      <Group title="Hooks">
+        <Entry name="useWasmTable" kind="hook" signature={API.useWasmTable}>
+          <p>Loads an engine, creates one table in it, and disposes both on unmount.</p>
+          <Fields
+            rows={[
+              [
+                "wasmUrl",
+                "Where to fetch engine.wasm from. Defaults to the copy beside the bundle.",
+              ],
+              ["initialRows", "Rows inserted once, as soon as the table exists."],
+              ["shared", "Share one table by key. Not implemented yet."],
+              ["mode", '"sync" today. "worker" is not implemented yet.'],
+            ]}
+          />
+          <p>
+            The result is a discriminated union. <code>status</code> narrows before destructuring,{" "}
+            <code>isReady</code> after it.
+          </p>
+        </Entry>
+
+        <Separator />
+
+        <Entry name="useTableView" kind="hook" signature={API.useTableView}>
+          <p>
+            One window of a table, or <code>null</code> while it loads. Re-renders when the revision
+            moves, and reads only the rows in the window.
+          </p>
+        </Entry>
+
+        <Separator />
+
+        <Entry name="useTableStats" kind="hook" signature={API.useTableStats}>
+          <p>
+            Size and revision without reading any rows, for a header or a status bar.{" "}
+            <code>null</code> while the table loads.
+          </p>
+        </Entry>
+      </Group>
+
+      <Group title="Schema">
+        <Entry name="defineSchema" kind="function" signature={API.defineSchema}>
+          <p>
+            Declares a table's columns. Key order is column order, and the literal kinds are what
+            make <code>Row</code>, <code>setCell</code> and <code>view.get</code> typed.
+          </p>
+          <Fields
+            rows={[
+              ["i32", "32-bit integer."],
+              ["f64", "64-bit float."],
+              ["string", "Dictionary-encoded; cells hold int32 ids."],
+            ]}
+          />
+        </Entry>
+
+        <Separator />
+
+        <Entry name="Row" kind="type" signature={API.Row}>
+          <p>One row as an object, inferred from the schema.</p>
+        </Entry>
+
+        <Separator />
+
+        <Entry name="TableSchema" kind="type" signature={API.TableSchema}>
+          <p>
+            What <code>defineSchema</code> returns. <code>names</code> and <code>kinds</code> are
+            parallel and in column order.
+          </p>
+        </Entry>
+
+        <Separator />
+
+        <Entry name="SchemaSpec" kind="type" signature={API.SchemaSpec}>
+          <p>
+            The object passed to <code>defineSchema</code>: column name to column kind.
+          </p>
+        </Entry>
+
+        <Separator />
+
+        <Entry name="ColumnKind" kind="type" signature={API.ColumnKind}>
+          <p>What a column can hold.</p>
+        </Entry>
+
+        <Separator />
+
+        <Entry name="ValueOf" kind="type" signature={API.ValueOf}>
+          <p>The JS type one column kind produces.</p>
+        </Entry>
+
+        <Separator />
+
+        <Entry name="ColumnArray" kind="type" signature={API.ColumnArray}>
+          <p>One column's rows, in the form insertColumns takes.</p>
+        </Entry>
+
+        <Separator />
+
+        <Entry name="ColumnsInput" kind="type" signature={API.ColumnsInput}>
+          <p>
+            Every column as its own array. A <code>Float64Array</code> or <code>Int32Array</code> is
+            the fast path: it goes into the engine with no per-row work.
+          </p>
+        </Entry>
+      </Group>
+
+      <Group title="Store">
+        <Entry name="TableStore" kind="type" signature={API.TableStore}>
+          <p>One table. Framework-agnostic, and what the hooks hand back.</p>
+          <Fields
+            rows={[
+              ["insertRows", "Append rows given as objects."],
+              ["insertColumns", "Append rows given as one array per column."],
+              ["setCell", "Write one cell, by row id and column name."],
+              ["deleteRows", "Tombstone rows. Surviving ids do not move."],
+              ["view", "Read a window. Same object for the same revision and window."],
+              ["subscribe", "Called after any mutation that moved the revision."],
+              ["dispose", "Drop the table. Later calls throw."],
+            ]}
+          />
+        </Entry>
+
+        <Separator />
+
+        <Entry name="TableView" kind="type" signature={API.TableView}>
+          <p>
+            One window. Columnar inside; <code>row()</code> and <code>rows()</code> build objects
+            only when something needs them. <code>start</code> is where the window actually begins
+            after clamping, which is not always what was asked for.
+          </p>
+        </Entry>
+
+        <Separator />
+
+        <Entry name="RowIds" kind="type" signature={API.RowIds}>
+          <p>
+            The ids an insert produced. Always a contiguous run, so it is described rather than
+            materialised: an array of 200,000 numbers is 1.6 MB almost every caller throws away.
+          </p>
+        </Entry>
+
+        <Separator />
+
+        <Entry name="TableStats" kind="type" signature={API.TableStats}>
+          <p>
+            What <code>useTableStats</code> returns.
+          </p>
+        </Entry>
+      </Group>
+
+      <Group title="Engine">
+        <Entry name="createEngine" kind="function" signature={API.createEngine}>
+          <p>
+            One wasm instance holding any number of tables, for use outside React. One instance is
+            one linear memory, which is why tables that share data have to share an engine.
+          </p>
+        </Entry>
+
+        <Separator />
+
+        <Entry name="Engine" kind="type" signature={API.Engine}>
+          <p>
+            <code>dispose()</code> drops every table made from it.
+          </p>
+        </Entry>
+
+        <Separator />
+
+        <Entry name="EngineOptions" kind="type" signature={API.EngineOptions}>
+          <p>
+            <code>cache</code> reuses the compiled module across engines with the same URL.
+          </p>
+        </Entry>
+      </Group>
+
+      <Group title="Errors">
+        <Entry name="WasmStateError" kind="class" signature={API.WasmStateError}>
+          <p>
+            Everything this package throws. The engine returns small negative integers rather than
+            trapping, and this turns the ones you should not ignore into something with a name and a
+            stack.
+          </p>
+        </Entry>
+
+        <Separator />
+
+        <Entry name="WasmStateErrorCode" kind="type" signature={API.WasmStateErrorCode}>
+          <p>Stable names, for switching on a failure.</p>
+        </Entry>
+      </Group>
+
+      <Group title="Hook results">
+        <Entry name="UseWasmTableResult" kind="type" signature={API.UseWasmTableResult}>
+          <p>
+            <code>isReady</code> carries a literal type per branch, so it narrows after
+            destructuring where <code>status</code> no longer can.
+          </p>
+        </Entry>
+
+        <Separator />
+
+        <Entry name="UseWasmTableOptions" kind="type" signature={API.UseWasmTableOptions}>
+          <p>
+            Read once, on mount. A table holding rows cannot be migrated, so changing the schema
+            afterwards is ignored.
+          </p>
+        </Entry>
+      </Group>
+    </div>
+  );
+}
