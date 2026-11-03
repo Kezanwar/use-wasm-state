@@ -6,6 +6,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import {
   defineSchema,
+  useTableQuery,
   useTableStats,
   useTableView,
   useWasmTable,
@@ -456,5 +457,79 @@ describe("useTableStats", () => {
 
     expect(after).not.toBe(before);
     expect(after).toEqual({ revision: 1, rowCount: 1, totalRows: 1 });
+  });
+});
+
+describe("useTableQuery", () => {
+  it("tracks the query and is null while loading", async () => {
+    let table!: TableStore<Schema>;
+
+    function Toolbar() {
+      const { status, table: t } = useWasmTable(schema, {
+        wasmUrl: ENGINE_URL,
+        initialRows: [
+          { id: 1, price: 30, status: "paid" },
+          { id: 2, price: 10, status: "new" },
+        ],
+      });
+      const query = useTableQuery(t);
+      if (status === "ready") table = t;
+      return (
+        <p data-testid="query">
+          {query === null
+            ? "none"
+            : `${query.sort.map((s) => `${s.column}:${s.direction}`).join(",")}|${
+                query.filters.length
+              }|${query.search}`}
+        </p>
+      );
+    }
+
+    render(<Toolbar />);
+    expect(screen.getByTestId("query").textContent).toBe("none");
+    await waitFor(() => expect(screen.getByTestId("query").textContent).toBe("|0|"));
+
+    await act(async () => table.sortBy("price", "desc"));
+    expect(screen.getByTestId("query").textContent).toBe("price:desc|0|");
+
+    await act(async () => table.search("pa"));
+    expect(screen.getByTestId("query").textContent).toBe("price:desc|0|pa");
+
+    await act(async () => table.filter([{ column: "status", op: "eq", value: "paid" }]));
+    expect(screen.getByTestId("query").textContent).toBe("price:desc|1|pa");
+
+    await act(async () => table.clearQuery());
+    expect(screen.getByTestId("query").textContent).toBe("|0|");
+  });
+
+  it("re-renders the rows and the toolbar on one revision bump", async () => {
+    let table!: TableStore<Schema>;
+
+    function Both() {
+      const { status, table: t } = useWasmTable(schema, {
+        wasmUrl: ENGINE_URL,
+        initialRows: [
+          { id: 1, price: 30, status: "paid" },
+          { id: 2, price: 10, status: "new" },
+        ],
+      });
+      const query = useTableQuery(t);
+      const view = useTableView(t, 0, 10);
+      if (status === "ready") table = t;
+      return (
+        <>
+          <p data-testid="sorted">{query?.sort[0]?.column ?? "none"}</p>
+          <p data-testid="first">{view?.get(0, "id") ?? -1}</p>
+        </>
+      );
+    }
+
+    render(<Both />);
+    await waitFor(() => expect(screen.getByTestId("first").textContent).toBe("1"));
+
+    await act(async () => table.sortBy("price", "asc"));
+    // Both read the same revision, so neither can be a frame behind.
+    expect(screen.getByTestId("sorted").textContent).toBe("price");
+    expect(screen.getByTestId("first").textContent).toBe("2");
   });
 });

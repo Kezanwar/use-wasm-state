@@ -19,6 +19,7 @@ import {
   readView,
   serveEngine,
   setCellString,
+  setQuery,
   viewPacked,
 } from "./helpers/engine";
 import { bytesIn, f64In, i32In, stringIn, u32In, withInput } from "../src/engine/input";
@@ -968,5 +969,113 @@ describe("the view header", () => {
     const v = readView(e, h, 5, 10, SCHEMA)!;
     expect(v.start).toBe(2);
     expect(v.ids.length).toBe(0);
+  });
+});
+
+/* ------------------------------------------------------------------ */
+/* setQuery                                                            */
+/* ------------------------------------------------------------------ */
+
+describe("setQuery", () => {
+  async function queryTable() {
+    const e = await newEngine();
+    const h = createTable(e, SCHEMA);
+    insertColumns(e, h, [
+      { type: ColumnType.I32, values: [100, 200, 300, 400, 500] },
+      { type: ColumnType.F64, values: [30, 10, 20, 10, 40] },
+      { type: ColumnType.String, values: ["paid", "new", "paid", "Shipped", "new"] },
+    ]);
+    return { e, h };
+  }
+
+  const order = (e: EngineExports, h: number) => [...readView(e, h, 0, e.rowCount(h), SCHEMA)!.ids];
+
+  it("sorts, and the TS encoder agrees with the Go decoder", async () => {
+    const { e, h } = await queryTable();
+
+    expect(setQuery(e, h, { sort: [{ col: 1, desc: false }], filters: [], search: "" })).toBe(
+      Status.OK
+    );
+    expect(order(e, h)).toEqual([1, 3, 2, 0, 4]);
+
+    expect(setQuery(e, h, { sort: [{ col: 1, desc: true }], filters: [], search: "" })).toBe(
+      Status.OK
+    );
+    expect(order(e, h)).toEqual([4, 0, 2, 1, 3]);
+  });
+
+  it("filters on each operator", async () => {
+    const { e, h } = await queryTable();
+    const only = (filter: Parameters<typeof setQuery>[2]["filters"][number]) => {
+      expect(setQuery(e, h, { sort: [], filters: [filter], search: "" })).toBe(Status.OK);
+      return order(e, h);
+    };
+    const base = { number: 0, upper: 0, text: "", list: [] as string[] };
+
+    expect(only({ ...base, col: 1, op: 0, number: 10 })).toEqual([1, 3]); // eq
+    expect(only({ ...base, col: 1, op: 4, number: 20 })).toEqual([0, 4]); // gt
+    expect(only({ ...base, col: 1, op: 6, number: 10, upper: 20 })).toEqual([1, 2, 3]); // between
+    expect(only({ ...base, col: 2, op: 0, text: "paid" })).toEqual([0, 2]); // eq
+    expect(only({ ...base, col: 2, op: 7, list: ["new", "paid"] })).toEqual([0, 1, 2, 4]); // in
+    expect(only({ ...base, col: 2, op: 8, text: "SHIP" })).toEqual([3]); // contains
+  });
+
+  it("searches across the string columns", async () => {
+    const { e, h } = await queryTable();
+    expect(setQuery(e, h, { sort: [], filters: [], search: "ship" })).toBe(Status.OK);
+    expect(order(e, h)).toEqual([3]);
+    expect(e.rowCount(h)).toBe(1);
+  });
+
+  it("restores id order for an empty query", async () => {
+    const { e, h } = await queryTable();
+    setQuery(e, h, { sort: [{ col: 1, desc: true }], filters: [], search: "" });
+    expect(setQuery(e, h, { sort: [], filters: [], search: "" })).toBe(Status.OK);
+    expect(order(e, h)).toEqual([0, 1, 2, 3, 4]);
+  });
+
+  it("bumps the revision only when the order could differ", async () => {
+    const { e, h } = await queryTable();
+    const rev = () => e.revision(h) >>> 0;
+
+    const query = { sort: [{ col: 1, desc: true }], filters: [], search: "" };
+    setQuery(e, h, query);
+    const after = rev();
+
+    setQuery(e, h, query);
+    expect(rev()).toBe(after);
+
+    setQuery(e, h, { ...query, sort: [{ col: 1, desc: false }] });
+    expect(rev()).not.toBe(after);
+  });
+
+  it("reports a bad query and keeps the previous one", async () => {
+    const { e, h } = await queryTable();
+    setQuery(e, h, { sort: [{ col: 1, desc: true }], filters: [], search: "" });
+    const before = order(e, h);
+
+    const base = { number: 0, upper: 0, text: "", list: [] as string[] };
+    expect(setQuery(e, h, { sort: [{ col: 9, desc: false }], filters: [], search: "" })).toBe(
+      Status.OutOfRange
+    );
+    // A numeric operator on a string column.
+    expect(setQuery(e, h, { sort: [], filters: [{ ...base, col: 2, op: 2 }], search: "" })).toBe(
+      Status.WrongType
+    );
+
+    expect(order(e, h)).toEqual(before);
+  });
+
+  it("rejects a malformed buffer", async () => {
+    const { e, h } = await queryTable();
+    expect(e.setQuery(h, 0, -1)).toBe(Status.BadArgument);
+    expect(
+      withInput(e, [bytesIn(new Uint8Array([1, 0, 0, 0]))], ([q]) => e.setQuery(h, q.ptr, q.len))
+    ).toBe(Status.BadArgument);
+  });
+
+  it("reports a bad handle", async () => {
+    const e = await newEngine();
+    expect(setQuery(e, 99, { sort: [], filters: [], search: "" })).toBe(Status.BadHandle);
   });
 });

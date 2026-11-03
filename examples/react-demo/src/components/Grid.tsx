@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ArrowDown, ArrowUp } from "lucide-react";
 import { cn } from "cn";
-import { useTableView, type TableStore } from "use-wasm-state";
+import { useTableQuery, useTableView, type SortDirection, type TableStore } from "use-wasm-state";
 import { useVirtualWindow } from "@/hooks/useVirtualWindow";
 import { formatDate, formatPrice } from "@/lib/format";
 import type { Order, schema } from "@/lib/orders";
@@ -51,11 +52,14 @@ export interface GridProps {
   selection: Selection | null;
   onSelectionChange: (selection: Selection | null) => void;
   onEdit: (run: () => void) => void;
+  /** Sorting changes the query, which the caller treats differently. */
+  onSort: (run: () => void) => void;
 }
 
-export function Grid({ table, rowCount, selection, onSelectionChange, onEdit }: GridProps) {
+export function Grid({ table, rowCount, selection, onSelectionChange, onEdit, onSort }: GridProps) {
   const window = useVirtualWindow(rowCount, ROW_HEIGHT);
   const view = useTableView(table, window.start, window.count);
+  const query = useTableQuery(table);
 
   const [cursor, setCursor] = useState<Cursor>({ row: 0, col: 0 });
   const [editing, setEditing] = useState(false);
@@ -129,14 +133,36 @@ export function Grid({ table, rowCount, selection, onSelectionChange, onEdit }: 
         className="sticky top-0 z-10 grid border-b bg-background/95 text-xs font-medium text-muted-foreground backdrop-blur"
         style={{ gridTemplateColumns: TEMPLATE, height: ROW_HEIGHT }}
       >
-        {COLUMNS.map((column) => (
-          <div
-            key={column.key}
-            className={cn("truncate px-3 leading-8", column.align === "right" && "text-right")}
-          >
-            {column.label}
-          </div>
-        ))}
+        {COLUMNS.map((column) => {
+          const at = query?.sort.findIndex((key) => key.column === column.key) ?? -1;
+          const sort = at === -1 ? undefined : query!.sort[at];
+          return (
+            <button
+              key={column.key}
+              type="button"
+              data-testid={`sort-${column.key}`}
+              aria-sort={sort ? (sort.direction === "desc" ? "descending" : "ascending") : "none"}
+              onClick={(event) => onSort(() => cycleSort(table, column.key, event.shiftKey))}
+              className={cn(
+                "hover:text-foreground flex items-center gap-1 truncate px-3 leading-8 transition-colors",
+                column.align === "right" && "justify-end",
+                sort && "text-foreground"
+              )}
+            >
+              {column.label}
+              {sort &&
+                (sort.direction === "desc" ? (
+                  <ArrowDown className="size-3" />
+                ) : (
+                  <ArrowUp className="size-3" />
+                ))}
+              {/* Only worth showing once a second key exists. */}
+              {sort && (query?.sort.length ?? 0) > 1 && (
+                <span className="tabular text-[10px]">{at + 1}</span>
+              )}
+            </button>
+          );
+        })}
       </div>
 
       {/* Sized to the whole table so the scrollbar tells the truth, while
@@ -266,4 +292,30 @@ function Cell({
       {display}
     </div>
   );
+}
+
+/**
+ * Click a header to sort: ascending, then descending, then off. Shift-click
+ * adds the column to the existing sort rather than replacing it.
+ *
+ * Three states on one control, and the arrow says which one you are in, so
+ * there is nothing to explain.
+ */
+function cycleSort(table: TableStore<Schema>, column: keyof Order, shift: boolean) {
+  const sort = table.query.sort;
+  const at = sort.findIndex((key) => key.column === column);
+  const current: SortDirection | undefined = at === -1 ? undefined : sort[at]!.direction;
+  const next: SortDirection | undefined =
+    current === undefined ? "asc" : current === "asc" ? "desc" : undefined;
+
+  if (!shift) {
+    table.sortBy(column, next);
+    return;
+  }
+
+  const rest = sort.filter((key) => key.column !== column);
+  table.setQuery({
+    ...table.query,
+    sort: next ? [...rest, { column, direction: next }] : rest,
+  });
 }

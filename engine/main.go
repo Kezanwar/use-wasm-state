@@ -204,6 +204,28 @@ func setCellString(h, row, col int32, ptr unsafe.Pointer, n int32) int32 {
 	return abi.StatusOf(t.SetStringBytes(row, col, bytesAt(ptr, n)))
 }
 
+// setQuery replaces the table's sort, filters and search in one call.
+//
+// One call because it is one thing: applying half a query would show the
+// wrong rows. A rejected query leaves the previous one in place, and the
+// revision moves only if the resulting order could differ.
+//
+//go:wasmexport setQuery
+func setQuery(h int32, ptr unsafe.Pointer, n int32) int32 {
+	t, err := engine.Table(h)
+	if err != nil {
+		return abi.StatusOf(err)
+	}
+	if n < 0 {
+		return abi.StatusBadArgument
+	}
+	q, err := abi.DecodeQuery(bytesAt(ptr, n))
+	if err != nil {
+		return abi.StatusOf(err)
+	}
+	return abi.StatusOf(t.SetQuery(q))
+}
+
 //go:wasmexport deleteRows
 func deleteRows(h int32, idsPtr unsafe.Pointer, count int32) int32 {
 	t, err := engine.Table(h)

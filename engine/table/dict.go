@@ -50,6 +50,16 @@ func (d *dictionary) intern(s string) int32 {
 	return d.add(h, s)
 }
 
+// lookup finds an existing value without adding it.
+func (d *dictionary) lookup(s string) (int32, bool) {
+	for _, id := range d.index[bucket(hashString(s))] {
+		if d.values[id] == s {
+			return id, true
+		}
+	}
+	return 0, false
+}
+
 // internBytes is intern for a value that is still UTF-8 bytes. It allocates
 // only when the value is new.
 func (d *dictionary) internBytes(b []byte) int32 {

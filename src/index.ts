@@ -30,5 +30,14 @@ export type { WasmStateErrorCode } from "./engine/errors";
 export { useWasmTable } from "./react/use-wasm-table";
 export type { UseWasmTableOptions, UseWasmTableResult } from "./react/use-wasm-table";
 
-export { useTableStats, useTableView } from "./react/use-table-view";
+export { useTableQuery, useTableStats, useTableView } from "./react/use-table-view";
 export type { TableStats } from "./react/use-table-view";
+
+export type {
+  FilterClause,
+  NumericOp,
+  SortDirection,
+  SortSpec,
+  StringOp,
+  TableQuery,
+} from "./store/query";

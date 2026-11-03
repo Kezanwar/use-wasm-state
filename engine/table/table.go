@@ -8,20 +8,15 @@ type column struct {
 	i32  []int32   // I32 values, or String dictionary ids
 	f64  []float64 // F64 values
 	dict dictionary
+
+	// Caches derived from the dictionary, for sorting and searching. Both
+	// are rebuilt only when the dictionary has grown past the stamp, and
+	// both are kept for the life of the column rather than per query.
+	rank      []int32  // dictionary id -> position in value order
+	rankOrder []int32  // scratch for building rank
+	rankFor   int32    // dictionary length rank was built for
+	lower     []string // dictionary id -> value, lowercased
 }
-
-// orderSpec is the stored sort/filter/search state.
-//
-// Empty in v1, on purpose. The order is already rebuilt from it after any
-// mutation that could change the result, so step 7 adds sorting by filling
-// the struct in rather than by threading a new call through every mutation.
-type orderSpec struct{}
-
-// empty reports whether the order is just the live rows in id order. While
-// that holds, a cell edit cannot change the order and the rebuild is
-// skipped; see bumpValues. Constant today, which lets the compiler drop the
-// check entirely.
-func (o orderSpec) empty() bool { return true }
 
 // Table is a columnar store with stable row ids.
 //
@@ -41,7 +36,24 @@ type Table struct {
 	// order is the live row ids in display order: what View reads through
 	// and what RowCount measures. Rebuilt, never patched.
 	order []int32
-	spec  orderSpec
+
+	// parsed is the query as a struct, for reading and applying; query is
+	// the same thing flattened to bytes, for telling one query from
+	// another in a single comparison. See SetQuery.
+	parsed       Query
+	query        []byte
+	queryScratch []byte
+
+	// Which dictionary entries each string filter and the search accept.
+	// Indexed by filter position and by column respectively.
+	filterMatch []matchSet
+	searchMatch []matchSet
+
+	// Scratch for the sort, sized to the row count and reused.
+	sortKeys        []uint64
+	sortKeysScratch []uint64
+	orderScratch    []int32
+	sortMode        sortMode
 
 	revision uint32
 }
@@ -295,7 +307,7 @@ func (t *Table) SetI32(rowID, col int32, v int32) error {
 		return err
 	}
 	c.i32[rowID] = v
-	t.bumpValues()
+	t.bumpValues(col)
 	return nil
 }
 
@@ -309,7 +321,7 @@ func (t *Table) SetF64(rowID, col int32, v float64) error {
 		return err
 	}
 	c.f64[rowID] = v
-	t.bumpValues()
+	t.bumpValues(col)
 	return nil
 }
 
@@ -326,7 +338,7 @@ func (t *Table) SetString(rowID, col int32, v string) error {
 		return err
 	}
 	c.i32[rowID] = c.dict.intern(v)
-	t.bumpValues()
+	t.bumpValues(col)
 	return nil
 }
 
@@ -345,7 +357,7 @@ func (t *Table) SetStringBytes(rowID, col int32, v []byte) error {
 		return err
 	}
 	c.i32[rowID] = c.dict.internBytes(v)
-	t.bumpValues()
+	t.bumpValues(col)
 	return nil
 }
 
@@ -380,16 +392,13 @@ func (t *Table) DeleteRows(rowIDs []int32) error {
 // bumpValues ends a mutation that changed cell values but not which rows
 // are live.
 //
-// With no sort or filter spec the order is just the live rows in id order,
-// so editing a cell cannot move anything and the rebuild is skipped. At
-// 200k rows that rebuild was the entire cost of a SetCell.
-//
-// Step 7: once orderSpec can hold a sort, filter or search, this has to
-// rebuild whenever the edited column appears in the spec, because the row
-// can then move or drop out of the result.
-func (t *Table) bumpValues() {
+
+// An edit to a column the query never looks at cannot move anything, so
+// the rebuild is skipped. At 200k rows that is the difference between an
+// edit costing nothing and costing a millisecond.
+func (t *Table) bumpValues(col int32) {
 	t.revision = nextRevision(t.revision)
-	if !t.spec.empty() {
+	if t.affectsOrder(col) {
 		t.rebuildOrder()
 	}
 }
@@ -409,6 +418,12 @@ func (t *Table) bumpLiveness() {
 // including a single SetCell; at 200k rows it is well inside a frame, and the
 // alternative is a patch path that step 7 would have to throw away.
 func (t *Table) rebuildOrder() {
+	t.ensureFilterMatches()
+	t.ensureSearchMatches()
+
+	filtered := len(t.parsed.Filters) > 0
+	searching := t.parsed.Search != ""
+
 	order := t.order[:0]
 	for w := 0; w < len(t.deleted); w++ {
 		base := int32(w) << 6
@@ -417,19 +432,28 @@ func (t *Table) rebuildOrder() {
 			end = t.rows
 		}
 		bits := t.deleted[w]
-		if bits == 0 {
-			// No tombstones in these 64 rows, which is the common case and
-			// worth skipping the per-row test for.
+		if bits == 0 && !filtered && !searching {
+			// No tombstones in these 64 rows and nothing to test, which is
+			// the common case and worth skipping the per-row work for.
 			for id := base; id < end; id++ {
 				order = append(order, id)
 			}
 			continue
 		}
 		for id := base; id < end; id++ {
-			if bits&(uint64(1)<<(uint32(id-base)&63)) == 0 {
-				order = append(order, id)
+			if bits&(uint64(1)<<(uint32(id-base)&63)) != 0 {
+				continue
 			}
+			if filtered && !t.passesFilters(id) {
+				continue
+			}
+			if searching && !t.matchesSearch(id) {
+				continue
+			}
+			order = append(order, id)
 		}
 	}
 	t.order = order
+
+	t.applySort(t.order)
 }

@@ -11,6 +11,13 @@ import type { ColumnKind, SyncEngineClient } from "../engine/client";
 import { ColumnType } from "../engine/abi";
 import { disposedError } from "../engine/errors";
 import type { ColumnsInput, Row, SchemaSpec, TableSchema } from "./schema";
+import {
+  normalizeQuery,
+  toWireQuery,
+  type FilterClause,
+  type SortDirection,
+  type TableQuery,
+} from "./query";
 
 /* ------------------------------------------------------------------ */
 /* Row ids                                                             */
@@ -93,6 +100,26 @@ export interface TableStore<S extends SchemaSpec = SchemaSpec> {
   /** Tombstone rows. Surviving row ids do not move. */
   deleteRows(rowIds: ArrayLike<number>): void;
 
+  /**
+   * Replace the sort, filters and search.
+   *
+   * The query persists: every later mutation re-applies it, so an inserted
+   * row lands where the sort says and an edited one leaves a filter it no
+   * longer matches. Parts left out are cleared; use the methods below to
+   * change one and keep the rest.
+   */
+  setQuery(query: TableQuery<S>): void;
+  /** Replace the sort with one column. Omit `direction` to clear it. */
+  sortBy(column: keyof S & string, direction?: SortDirection): void;
+  /** Replace the filters, keeping the sort and the search. */
+  filter(clauses: readonly FilterClause<S>[]): void;
+  /** Replace the search text, keeping the sort and the filters. */
+  search(text: string): void;
+  /** Back to live rows in id order. */
+  clearQuery(): void;
+  /** The query as it was last set. */
+  readonly query: Required<TableQuery<S>>;
+
   /** Bumped by every mutation that changed something. */
   readonly revision: number;
   /** Live rows. */
@@ -142,6 +169,11 @@ export function createTableStore<S extends SchemaSpec>(
   let disposed = false;
   let revision = client.revisionSync(handle);
   let cache: CachedView<S> | null = null;
+
+  // Mirrored rather than read back: it is what we set, and the engine has
+  // no reason to disagree. Reading it back would mean decoding a query on
+  // every render of a toolbar.
+  let query: Required<TableQuery<S>> = { sort: [], filters: [], search: "" };
 
   const alive = (op: string) => {
     if (disposed) throw disposedError(op, "table");
@@ -231,6 +263,40 @@ export function createTableStore<S extends SchemaSpec>(
       alive("deleteRows");
       client.deleteRowsSync(handle, ids);
       settle(false);
+    },
+
+    setQuery(next) {
+      alive("setQuery");
+      const normalized = normalizeQuery(next);
+      // Encoded before the call, so a column name the schema does not have
+      // throws with that name rather than coming back as a status code.
+      client.setQuerySync(handle, toWireQuery(schema, normalized));
+      query = normalized;
+      settle(false);
+    },
+
+    sortBy(column, direction) {
+      store.setQuery({
+        ...query,
+        sort: direction ? [{ column, direction }] : [],
+      });
+    },
+
+    filter(clauses) {
+      store.setQuery({ ...query, filters: clauses });
+    },
+
+    search(text) {
+      store.setQuery({ ...query, search: text });
+    },
+
+    clearQuery() {
+      store.setQuery({});
+    },
+
+    get query() {
+      alive("query");
+      return query;
     },
 
     get revision() {

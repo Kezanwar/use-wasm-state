@@ -300,6 +300,109 @@ export function decodeDict(bytes: Uint8Array): string[] {
 }
 
 /* ------------------------------------------------------------------ */
+/* Queries                                                             */
+/* ------------------------------------------------------------------ */
+
+/** Mirrors Op in engine/table/query.go. The numbers are the wire format. */
+export const FilterOp = {
+  eq: 0,
+  ne: 1,
+  lt: 2,
+  le: 3,
+  gt: 4,
+  ge: 5,
+  between: 6,
+  in: 7,
+  contains: 8,
+} as const;
+
+export type FilterOpName = keyof typeof FilterOp;
+
+/** One filter, flattened the way the wire format carries it. */
+export interface WireFilter {
+  col: number;
+  op: number;
+  number: number;
+  upper: number;
+  text: string;
+  list: readonly string[];
+}
+
+export interface WireQuery {
+  sort: readonly { col: number; desc: boolean }[];
+  filters: readonly WireFilter[];
+  search: string;
+}
+
+/**
+ * Encode a query for setQuery, mirroring DecodeQuery in engine/abi.
+ *
+ * Everything is length-prefixed and little-endian, and the whole query goes
+ * in one call: applying half of one would show the wrong rows. An empty
+ * query is three zero words and restores id order.
+ */
+export function encodeQuery(query: WireQuery): Uint8Array {
+  const parts: Uint8Array[] = [];
+  const strings = new Map<string, Uint8Array>();
+  const utf8 = (text: string) => {
+    let bytes = strings.get(text);
+    if (!bytes) {
+      bytes = encoder.encode(text);
+      strings.set(text, bytes);
+    }
+    return bytes;
+  };
+
+  let size = 0;
+  const push = (bytes: Uint8Array) => {
+    parts.push(bytes);
+    size += bytes.byteLength;
+  };
+  const u32 = (value: number) => {
+    const bytes = new Uint8Array(4);
+    new DataView(bytes.buffer).setUint32(0, value, true);
+    push(bytes);
+  };
+  const f64 = (value: number) => {
+    const bytes = new Uint8Array(8);
+    new DataView(bytes.buffer).setFloat64(0, value, true);
+    push(bytes);
+  };
+  const str = (text: string) => {
+    const bytes = utf8(text);
+    u32(bytes.byteLength);
+    push(bytes);
+  };
+
+  u32(query.sort.length);
+  for (const key of query.sort) {
+    u32(key.col);
+    push(Uint8Array.of(key.desc ? 1 : 0));
+  }
+
+  u32(query.filters.length);
+  for (const filter of query.filters) {
+    u32(filter.col);
+    push(Uint8Array.of(filter.op));
+    f64(filter.number);
+    f64(filter.upper);
+    str(filter.text);
+    u32(filter.list.length);
+    for (const item of filter.list) str(item);
+  }
+
+  str(query.search);
+
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const part of parts) {
+    out.set(part, at);
+    at += part.byteLength;
+  }
+  return out;
+}
+
+/* ------------------------------------------------------------------ */
 /* The module's exports                                                */
 /* ------------------------------------------------------------------ */
 
@@ -349,6 +452,12 @@ export interface EngineExports extends WasmAllocator, InputHost {
   setCellString(handle: number, row: number, col: number, ptr: number, len: number): number;
   deleteRows(handle: number, idsPtr: number, count: number): number;
 
+  /**
+   * Replace the sort, filters and search in one call. See encodeQuery for
+   * the layout. A rejected query leaves the previous one in place.
+   */
+  setQuery(handle: number, ptr: number, len: number): number;
+
   /** Read with `>>> 0`: it is a uint32 counter that wraps. */
   revision(handle: number): number;
   rowCount(handle: number): number;
@@ -382,6 +491,7 @@ export const ENGINE_EXPORTS = [
   "setCellF64",
   "setCellString",
   "deleteRows",
+  "setQuery",
   "revision",
   "rowCount",
   "totalRows",

@@ -108,6 +108,69 @@ export function ApiPage() {
             <code>null</code> while the table loads.
           </p>
         </Entry>
+
+        <Separator />
+
+        <Entry name="useTableQuery" kind="hook" signature={API.useTableQuery}>
+          <p>
+            The current sort, filters and search, for a toolbar that has to show which column is
+            sorted and what is filtered. <code>null</code> while the table loads.
+          </p>
+        </Entry>
+      </Group>
+
+      <Group title="Query">
+        <Entry name="TableQuery" kind="type" signature={API.TableQuery}>
+          <p>
+            A table has one query, and the row order is what it produces. It persists: every later
+            mutation re-applies it, so an inserted row lands where the sort says and an edited one
+            leaves a filter it no longer matches.
+          </p>
+          <Fields
+            rows={[
+              ["sort", "Columns in priority order. Stable, ties broken by row id."],
+              ["filters", "Clauses, combined with AND."],
+              ["search", "Case-insensitive substring across every string column."],
+            ]}
+          />
+        </Entry>
+
+        <Separator />
+
+        <Entry name="FilterClause" kind="type" signature={API.FilterClause}>
+          <p>
+            Distributed over the columns, so the value is typed by the column it names and an
+            operator a column cannot answer is a type error rather than a runtime one.
+          </p>
+        </Entry>
+
+        <Separator />
+
+        <Entry name="NumericOp" kind="type" signature={API.NumericOp}>
+          <p>
+            Plus <code>between</code>, which takes a pair of bounds.
+          </p>
+        </Entry>
+
+        <Separator />
+
+        <Entry name="StringOp" kind="type" signature={API.StringOp}>
+          <p>
+            Plus <code>in</code>, which takes a list. <code>contains</code> is case-insensitive.
+          </p>
+        </Entry>
+
+        <Separator />
+
+        <Entry name="SortSpec" kind="type" signature={API.SortSpec}>
+          <p>One column of a multi-column sort.</p>
+        </Entry>
+
+        <Separator />
+
+        <Entry name="SortDirection" kind="type" signature={API.SortDirection}>
+          <p>Default is ascending.</p>
+        </Entry>
       </Group>
 
       <Group title="Schema">
@@ -185,6 +248,12 @@ export function ApiPage() {
               ["insertColumns", "Append rows given as one array per column."],
               ["setCell", "Write one cell, by row id and column name."],
               ["deleteRows", "Tombstone rows. Surviving ids do not move."],
+              ["setQuery", "Replace the sort, filters and search. Parts left out are cleared."],
+              ["sortBy", "Replace the sort with one column. No direction clears it."],
+              ["filter", "Replace the filters, keeping the sort and the search."],
+              ["search", "Replace the search text, keeping the rest."],
+              ["clearQuery", "Back to live rows in id order."],
+              ["query", "The query as it was last set."],
               ["view", "Read a window. Same object for the same revision and window."],
               ["subscribe", "Called after any mutation that moved the revision."],
               ["dispose", "Drop the table. Later calls throw."],

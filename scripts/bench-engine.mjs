@@ -224,6 +224,57 @@ async function timeStore() {
 
   if (sink < 0) throw new Error("unreachable");
 
+  // Queries, measured the way a header click or a keystroke costs.
+  const QUERIES = 200;
+  const timeQuery = (label, run) => {
+    run();
+    const started = performance.now();
+    for (let i = 0; i < QUERIES; i++) run(i);
+    return { label, ms: (performance.now() - started) / QUERIES };
+  };
+
+  const queries = [
+    timeQuery("sort f64", (i) => table.sortBy("price", i % 2 ? "asc" : "desc")),
+    timeQuery("sort i32", (i) => table.sortBy("id", i % 2 ? "asc" : "desc")),
+    timeQuery("sort string", (i) => table.sortBy("status", i % 2 ? "asc" : "desc")),
+    timeQuery("sort multi", (i) =>
+      table.setQuery({
+        sort: [{ column: "status" }, { column: "price", direction: i % 2 ? "asc" : "desc" }],
+      })
+    ),
+    timeQuery("filter numeric", (i) =>
+      table.setQuery({ filters: [{ column: "price", op: "gt", value: (i % 10) * 100 }] })
+    ),
+    timeQuery("filter string eq", (i) =>
+      table.setQuery({
+        filters: [{ column: "status", op: "eq", value: LABELS[i % LABELS.length] }],
+      })
+    ),
+    timeQuery("filter string in", (i) =>
+      table.setQuery({
+        filters: [{ column: "status", op: "in", value: LABELS.slice(0, (i % 3) + 1) }],
+      })
+    ),
+    timeQuery("search", (i) => table.search(["ship", "pai", "hel", "new"][i % 4])),
+    timeQuery("filter + search + sort", (i) =>
+      table.setQuery({
+        filters: [{ column: "price", op: "gt", value: 100 }],
+        search: ["e", "a", "i"][i % 3],
+        sort: [{ column: "price", direction: i % 2 ? "asc" : "desc" }],
+      })
+    ),
+  ];
+  table.clearQuery();
+
+  const sortedCell = (() => {
+    table.sortBy("price", "asc");
+    const started = performance.now();
+    for (let i = 0; i < 200; i++) table.setCell(i, "price", i + 0.5);
+    const ms = (performance.now() - started) / 200;
+    table.clearQuery();
+    return ms;
+  })();
+
   console.log();
   console.log("through the store:");
   console.log(`  insertColumns ${ROWS}  ${insertColumnsMs.toFixed(1)}ms`);
@@ -232,6 +283,12 @@ async function timeStore() {
   console.log(`  view() cache hit          ${cachedUs.toFixed(3)}us`);
   console.log(`  setCell (f64)             ${setCellUs.toFixed(2)}us`);
   console.log(`  setCell (known string)    ${setStringUs.toFixed(2)}us`);
+  console.log();
+  console.log("queries (200k rows, each applied from scratch):");
+  for (const { label, ms } of queries) {
+    console.log(`  ${label.padEnd(24)}${ms.toFixed(2)}ms`);
+  }
+  console.log(`  setCell under a sort    ${sortedCell.toFixed(2)}ms`);
 }
 
 await timeStore();

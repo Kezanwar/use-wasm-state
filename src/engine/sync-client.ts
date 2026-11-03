@@ -14,11 +14,13 @@ import {
   ColumnType,
   decodeDict,
   decodeView,
+  encodeQuery,
   encodeSchema,
   encodeStrings,
   type ColumnSpec,
   type DecodedView,
   type EngineExports,
+  type WireQuery,
 } from "./abi";
 import type { CellValue, ColumnKind, ColumnValues, SyncEngineClient } from "./client";
 import { disposedError, WasmStateError } from "./errors";
@@ -138,6 +140,15 @@ export class SyncClient implements SyncEngineClient {
     );
   }
 
+  setQuerySync(handle: number, query: WireQuery): void {
+    const e = this.#e("setQuery");
+    const bytes = encodeQuery(query);
+    WasmStateError.check(
+      withInput(e, [bytesIn(bytes)], ([q]) => e.setQuery(handle, q.ptr, q.len)),
+      "setQuery"
+    );
+  }
+
   /* ---------------------------------------------------------------- */
   /* Reads                                                             */
   /* ---------------------------------------------------------------- */
@@ -216,6 +227,9 @@ export class SyncClient implements SyncEngineClient {
   }
   async deleteRows(handle: number, rowIds: ArrayLike<number>): Promise<void> {
     this.deleteRowsSync(handle, rowIds);
+  }
+  async setQuery(handle: number, query: WireQuery): Promise<void> {
+    this.setQuerySync(handle, query);
   }
   async view(
     handle: number,

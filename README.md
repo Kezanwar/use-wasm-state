@@ -8,8 +8,7 @@ on the state also run in wasm. So this is not generic state: it ships a
 prebuilt engine and exposes specialised data structures whose work happens in
 Go, with only what React needs to render crossing back to JS.
 
-First structure: a table. Sort, filter, group and search 200k rows while you
-scroll.
+First structure: a table. Sort, filter and search 200k rows while you scroll.
 
 > **Status: early.** Not published yet. Sync mode only; worker mode and
 > shared tables are not built. See the build order below.
@@ -73,6 +72,46 @@ table.setCell(rowId, "price", 12.5);
 
 Row ids are permanent positions, so they are stable React keys. A delete
 writes a tombstone and nothing moves.
+
+## Sort, filter and search
+
+A table has one query, and the row order is what it produces:
+
+```
+live rows -> filters (AND) -> search -> sort
+```
+
+It persists. Every mutation re-applies it, so an inserted row lands where
+the sort says and an edited one leaves a filter it no longer matches.
+
+```tsx
+table.sortBy("price", "desc");
+table.filter([{ column: "status", op: "in", value: ["paid", "shipped"] }]);
+table.search("acme");
+
+table.setQuery({
+  sort: [{ column: "status" }, { column: "price", direction: "desc" }],
+  filters: [{ column: "price", op: "between", value: [10, 100] }],
+  search: "acme",
+});
+
+table.clearQuery();
+```
+
+`sortBy`, `filter` and `search` each replace one part and keep the rest;
+`setQuery` replaces the whole thing and clears what you leave out.
+
+Operators are typed by the column they name. Numbers take `eq`, `ne`, `lt`,
+`le`, `gt`, `ge` and `between`; strings take `eq`, `ne`, `in` and
+`contains`. `contains` and `search` are case-insensitive, and `search`
+looks at every string column.
+
+Sorting is multi-column, stable, and ties break by row id. It runs on
+unsigned keys rather than values, so a string column sorts by a cached rank
+per dictionary entry and a 200k-row sort is one pass over the rows.
+
+`useTableQuery(table)` gives a toolbar the active query, reactive on the
+same revision the rows are.
 
 ## Sync mode
 
@@ -165,7 +204,7 @@ Nothing else does.
 4. ~~ABI in `main.go`, build, `abi.test.ts`~~
 5. ~~`SyncClient` + `TableStore` + `useWasmTable` / `useTableView`~~
 6. ~~Demo grid with 200k rows~~
-7. Sort, filter, search in Go
+7. ~~Sort, filter, search in Go~~
 8. `WorkerClient` + worker mode
 9. Provider / shared tables
 10. Benchmarks against a plain JS implementation, docs

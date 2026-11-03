@@ -13,7 +13,7 @@
  * Internal. Not exported from src/index.ts.
  */
 
-import type { ColumnSpec, DecodedView } from "./abi";
+import type { ColumnSpec, DecodedView, WireQuery } from "./abi";
 
 /** The three things a column can hold. Mirrors the wire types in ./abi. */
 export type ColumnKind = "i32" | "f64" | "string";
@@ -51,6 +51,14 @@ export interface EngineClient {
   ): Promise<void>;
   deleteRows(handle: number, rowIds: ArrayLike<number>): Promise<void>;
 
+  /**
+   * Replace the sort, filters and search in one call.
+   *
+   * One call because it is one thing: a half-applied query would show the
+   * wrong rows. A rejected query leaves the previous one in place.
+   */
+  setQuery(handle: number, query: WireQuery): Promise<void>;
+
   /** Read one window. The schema is needed to decode the columns. */
   view(
     handle: number,
@@ -85,6 +93,7 @@ export interface SyncEngineClient extends EngineClient {
   insertColumnsSync(handle: number, columns: readonly ColumnValues[]): number;
   setCellSync(handle: number, rowId: number, col: number, kind: ColumnKind, value: CellValue): void;
   deleteRowsSync(handle: number, rowIds: ArrayLike<number>): void;
+  setQuerySync(handle: number, query: WireQuery): void;
 
   viewSync(
     handle: number,

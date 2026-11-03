@@ -21,6 +21,10 @@ export const API = {
   table: TableStore<S> | null
 ): TableStats | null;`,
 
+  useTableQuery: `function useTableQuery<S extends SchemaSpec>(
+  table: TableStore<S> | null
+): Required<TableQuery<S>> | null;`,
+
   defineSchema: `function defineSchema<const S extends SchemaSpec>(
   spec: S
 ): TableSchema<S>;
@@ -62,6 +66,13 @@ defineSchema({ id: "i32", name: "string", price: "f64" });`,
   setCell<K extends keyof S & string>(rowId: number, column: K, value: Row<S>[K]): void;
   deleteRows(rowIds: ArrayLike<number>): void;
 
+  setQuery(query: TableQuery<S>): void;
+  sortBy(column: keyof S & string, direction?: SortDirection): void;
+  filter(clauses: readonly FilterClause<S>[]): void;
+  search(text: string): void;
+  clearQuery(): void;
+  readonly query: Required<TableQuery<S>>;
+
   readonly revision: number;
   readonly rowCount: number;
   readonly totalRows: number;
@@ -92,6 +103,33 @@ defineSchema({ id: "i32", name: "string", price: "f64" });`,
   rowCount: number;
   totalRows: number;
 }`,
+
+  TableQuery: `interface TableQuery<S extends SchemaSpec> {
+  sort?: readonly SortSpec<S>[];
+  filters?: readonly FilterClause<S>[];
+  search?: string;
+}
+
+// live rows -> filters (AND) -> search -> sort`,
+
+  SortSpec: `interface SortSpec<S extends SchemaSpec> {
+  column: keyof S & string;
+  direction?: SortDirection;
+}`,
+
+  SortDirection: `type SortDirection = "asc" | "desc";`,
+
+  FilterClause: `type FilterClause<S extends SchemaSpec> = {
+  [K in keyof S & string]: S[K] extends "string"
+    ? { column: K; op: StringOp; value: string }
+    | { column: K; op: "in"; value: readonly string[] }
+    : { column: K; op: NumericOp; value: number }
+    | { column: K; op: "between"; value: readonly [number, number] };
+}[keyof S & string];`,
+
+  NumericOp: `type NumericOp = "eq" | "ne" | "lt" | "le" | "gt" | "ge";`,
+
+  StringOp: `type StringOp = "eq" | "ne" | "contains";`,
 
   createEngine: `function createEngine(options?: EngineOptions): Promise<Engine>;`,
 

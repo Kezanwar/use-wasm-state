@@ -84,6 +84,50 @@ One window, or `null` while loading. Re-renders when the revision moves.
 `{ revision, rowCount, totalRows }` or `null`. For headers and status bars
 that must update without reading rows.
 
+### `useTableQuery(table)`
+
+The current `{ sort, filters, search }` or `null`. For a toolbar.
+
+## Sort, filter and search
+
+A table has one query, and the row order is what it produces:
+
+```
+live rows -> filters (AND) -> search -> sort
+```
+
+It persists. Every mutation re-applies it, so an inserted row lands where
+the sort says and an edited one leaves a filter it no longer matches.
+
+```tsx
+table.sortBy("price", "desc");
+table.filter([{ column: "status", op: "in", value: ["paid", "shipped"] }]);
+table.search("acme");
+
+table.setQuery({
+  sort: [{ column: "status" }, { column: "price", direction: "desc" }],
+  filters: [{ column: "price", op: "between", value: [10, 100] }],
+  search: "acme",
+});
+
+table.clearQuery();
+```
+
+`sortBy`, `filter` and `search` each replace one part and keep the rest;
+`setQuery` replaces the whole thing and clears what you leave out.
+
+Operators are typed by the column they name. Numbers take `eq`, `ne`, `lt`,
+`le`, `gt`, `ge` and `between`; strings take `eq`, `ne`, `in` and
+`contains`. `contains` and `search` are case-insensitive, and `search`
+looks at every string column.
+
+Sorting is multi-column, stable, and ties break by row id. It runs on
+unsigned keys rather than values, so a string column sorts by a cached rank
+per dictionary entry and a 200k-row sort is one pass over the rows.
+
+`useTableQuery(table)` gives a toolbar the active query, reactive on the
+same revision the rows are.
+
 ## Store
 
 `createEngine(options?) -> Promise<Engine>` for use outside React.
@@ -96,6 +140,13 @@ insertRows(rows: Row<S>[]): RowIds
 insertColumns(columns: ColumnsInput<S>): RowIds
 setCell(rowId, column, value): void
 deleteRows(rowIds: ArrayLike<number>): void
+
+setQuery(query: TableQuery<S>): void      // replaces the whole query
+sortBy(column, direction?): void          // no direction clears the sort
+filter(clauses: FilterClause<S>[]): void
+search(text: string): void
+clearQuery(): void
+readonly query: Required<TableQuery<S>>
 
 readonly revision: number
 readonly rowCount: number    // live rows
@@ -131,6 +182,8 @@ rows(): Row<S>[]
 
 ## Performance rules
 
+- **Sort, filter and search belong in the query**, not in JS. Reading rows
+  out to sort them defeats the whole design.
 - **Chunky calls only.** Never loop in JS calling the engine per item.
   `insertColumns` with typed arrays is the fast path; `insertRows` builds
   the columns for you.
@@ -154,6 +207,5 @@ thread, in a worker, and in Node.
 
 ## What is not built yet
 
-`mode: "worker"`, `options.shared`, and sorting, filtering and search
-inside Go. Each returns or throws a `WasmStateError` with code
-`not_implemented` rather than failing quietly.
+`mode: "worker"` and `options.shared`. Each reports a `WasmStateError` with
+code `not_implemented` rather than failing quietly.

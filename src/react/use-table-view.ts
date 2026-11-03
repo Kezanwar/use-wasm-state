@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useSyncExternalStore } from "react";
 import type { SchemaSpec } from "../store/schema";
+import type { TableQuery } from "../store/query";
 import type { TableStore, TableView } from "../store/table-store";
 
 /** No table yet, so nothing to show a revision for. */
@@ -78,4 +79,20 @@ export function useTableStats<S extends SchemaSpec>(
     if (!table) return null;
     return { revision, rowCount: table.rowCount, totalRows: table.totalRows };
   }, [table, revision]);
+}
+
+/**
+ * Subscribe to a table's query.
+ *
+ * For a toolbar that has to show which column is sorted and what is
+ * filtered, without reading any rows. Null while the table is loading.
+ */
+export function useTableQuery<S extends SchemaSpec>(
+  table: TableStore<S> | null
+): Required<TableQuery<S>> | null {
+  const revision = useRevision(table);
+
+  // Keyed on the revision like everything else: setQuery bumps it, so a
+  // toolbar updates on the same signal the rows do.
+  return useMemo(() => (table ? table.query : null), [table, revision]);
 }

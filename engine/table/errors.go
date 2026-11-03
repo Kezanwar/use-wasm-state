@@ -30,4 +30,7 @@ var (
 	// ErrDuplicateColumn means two columns share a name, which would make
 	// ColumnIndex ambiguous.
 	ErrDuplicateColumn = errors.New("table: duplicate column name")
+	// ErrBadRange means a between filter was given an upper bound below
+	// its lower bound, which can only ever match nothing.
+	ErrBadRange = errors.New("table: between needs an upper bound at or above the lower")
 )

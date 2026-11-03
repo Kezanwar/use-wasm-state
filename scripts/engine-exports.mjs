@@ -19,6 +19,7 @@ export const ABI_EXPORTS = [
   "setCellF64",
   "setCellString",
   "deleteRows",
+  "setQuery",
   "revision",
   "rowCount",
   "totalRows",

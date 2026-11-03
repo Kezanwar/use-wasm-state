@@ -1,9 +1,11 @@
 import { assertType, describe, expectTypeOf, it } from "vitest";
 import {
   defineSchema,
+  useTableQuery,
   useTableView,
   useWasmTable,
   type Row,
+  type TableQuery,
   type TableStore,
   type TableView,
 } from "../src/index";
@@ -143,5 +145,69 @@ describe("useTableView", () => {
 
   it("carries the schema through", () => {
     expectTypeOf(useTableView(table, 0, 10)).toEqualTypeOf<TableView<Schema> | null>();
+  });
+});
+
+describe("queries", () => {
+  it("takes a sort naming a column of the schema", () => {
+    table.setQuery({ sort: [{ column: "price", direction: "desc" }] });
+    table.sortBy("qty", "asc");
+    table.sortBy("status");
+  });
+
+  it("rejects a sort on a column that is not there", () => {
+    // @ts-expect-error -- no such column
+    table.setQuery({ sort: [{ column: "missing" }] });
+    // @ts-expect-error -- no such column
+    table.sortBy("missing", "asc");
+  });
+
+  it("rejects a direction that is not asc or desc", () => {
+    // @ts-expect-error -- not a direction
+    table.setQuery({ sort: [{ column: "price", direction: "sideways" }] });
+  });
+
+  it("types a filter value by the column it names", () => {
+    table.filter([{ column: "price", op: "gt", value: 10 }]);
+    table.filter([{ column: "price", op: "between", value: [1, 2] }]);
+    table.filter([{ column: "status", op: "eq", value: "paid" }]);
+    table.filter([{ column: "status", op: "in", value: ["paid", "new"] }]);
+    table.filter([{ column: "status", op: "contains", value: "pai" }]);
+  });
+
+  it("rejects a value of the wrong type for its column", () => {
+    // @ts-expect-error -- price holds numbers
+    table.filter([{ column: "price", op: "eq", value: "ten" }]);
+    // @ts-expect-error -- status holds strings
+    table.filter([{ column: "status", op: "eq", value: 1 }]);
+  });
+
+  it("allows a string operator only on a string column", () => {
+    // @ts-expect-error -- contains needs a string column
+    table.filter([{ column: "price", op: "contains", value: "x" }]);
+    // @ts-expect-error -- in needs a string column
+    table.filter([{ column: "qty", op: "in", value: ["1"] }]);
+  });
+
+  it("allows an ordering operator only on a number column", () => {
+    // @ts-expect-error -- gt needs a number column
+    table.filter([{ column: "status", op: "gt", value: 1 }]);
+    // @ts-expect-error -- between needs a number column
+    table.filter([{ column: "status", op: "between", value: [1, 2] }]);
+  });
+
+  it("takes a between as a pair", () => {
+    // @ts-expect-error -- between takes two bounds
+    table.filter([{ column: "price", op: "between", value: 5 }]);
+  });
+
+  it("reads the query back with every part filled in", () => {
+    expectTypeOf(table.query).toEqualTypeOf<Required<TableQuery<Schema>>>();
+    expectTypeOf(table.query.search).toEqualTypeOf<string>();
+  });
+
+  it("carries the schema through useTableQuery", () => {
+    expectTypeOf(useTableQuery(table)).toEqualTypeOf<Required<TableQuery<Schema>> | null>();
+    assertType<Required<TableQuery<Schema>> | null>(useTableQuery<Schema>(null));
   });
 });

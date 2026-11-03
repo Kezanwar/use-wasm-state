@@ -1,30 +1,86 @@
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Search, Trash2 } from "lucide-react";
+import { cn } from "cn";
 import { Button } from "@/components/ui/button";
 import { formatCount } from "@/lib/format";
+import { STATUSES } from "@/lib/orders";
 
 export interface ToolbarProps {
   selectedCount: number;
+  search: string;
+  statuses: readonly string[];
+  onSearch: (text: string) => void;
+  onToggleStatus: (status: string) => void;
   onAppend: () => void;
   onDelete: () => void;
   busy: boolean;
 }
 
-export function Toolbar({ selectedCount, onAppend, onDelete, busy }: ToolbarProps) {
+/**
+ * Everything that shapes the table, in one row.
+ *
+ * The status chips are the filter: a chip is on or off, and what is on is
+ * what you see. Nothing needs a label to say so.
+ */
+export function Toolbar({
+  selectedCount,
+  search,
+  statuses,
+  onSearch,
+  onToggleStatus,
+  onAppend,
+  onDelete,
+  busy,
+}: ToolbarProps) {
   return (
     <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3">
-      <h1 className="mr-auto text-sm font-semibold tracking-tight">Orders</h1>
+      <div className="relative">
+        <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2 size-3.5 -translate-y-1/2" />
+        <input
+          type="search"
+          value={search}
+          placeholder="Search"
+          data-testid="search"
+          onChange={(event) => onSearch(event.target.value)}
+          className="focus-visible:ring-ring/50 h-7 w-40 rounded-md border bg-transparent pr-2 pl-7 text-sm outline-none focus-visible:ring-[3px]"
+        />
+      </div>
 
-      {selectedCount > 0 && (
-        <Button variant="ghost" size="sm" onClick={onDelete} data-testid="delete">
-          <Trash2 />
-          {formatCount(selectedCount)}
+      <div className="flex items-center gap-1" role="group" aria-label="Status">
+        {STATUSES.map((status) => {
+          const on = statuses.includes(status);
+          return (
+            <button
+              key={status}
+              type="button"
+              aria-pressed={on}
+              data-testid={`status-${status}`}
+              onClick={() => onToggleStatus(status)}
+              className={cn(
+                "rounded-md border px-2 py-0.5 text-xs transition-colors",
+                on
+                  ? "border-transparent bg-primary text-primary-foreground"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+            >
+              {status}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="ml-auto flex items-center gap-2">
+        {selectedCount > 0 && (
+          <Button variant="ghost" size="sm" onClick={onDelete} data-testid="delete">
+            <Trash2 />
+            {formatCount(selectedCount)}
+          </Button>
+        )}
+
+        <Button variant="outline" size="sm" onClick={onAppend} disabled={busy} data-testid="append">
+          <Plus />
+          10,000
         </Button>
-      )}
-
-      <Button variant="outline" size="sm" onClick={onAppend} disabled={busy} data-testid="append">
-        <Plus />
-        10,000
-      </Button>
+      </div>
     </header>
   );
 }

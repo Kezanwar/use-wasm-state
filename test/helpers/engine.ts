@@ -7,11 +7,13 @@ import {
   ColumnType,
   decodeDict,
   decodeView,
+  encodeQuery,
   encodeSchema,
   encodeStrings,
   type ColumnSpec,
   type DecodedView,
   type EngineExports,
+  type WireQuery,
 } from "../../src/engine/abi";
 import { bytesIn, f64In, i32In, stringIn, u32In, withInput } from "../../src/engine/input";
 
@@ -107,6 +109,11 @@ export function insertColumns(
     });
     return e.insertColumns(handle, blocks[descIndex]!.ptr, columns.length);
   });
+}
+
+export function setQuery(e: EngineExports, handle: number, query: WireQuery): number {
+  const bytes = encodeQuery(query);
+  return withInput(e, [bytesIn(bytes)], ([q]) => e.setQuery(handle, q.ptr, q.len));
 }
 
 export function deleteRows(e: EngineExports, handle: number, ids: ArrayLike<number>): number {
