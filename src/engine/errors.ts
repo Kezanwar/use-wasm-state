@@ -18,7 +18,14 @@ export const ErrorCode = {
   [Status.BadArgument]: "bad-argument",
 } as const satisfies Record<number, string>;
 
-export type WasmStateErrorCode = (typeof ErrorCode)[keyof typeof ErrorCode] | "disposed" | "engine";
+export type WasmStateErrorCode =
+  | (typeof ErrorCode)[keyof typeof ErrorCode]
+  /** The store or engine was disposed before this call. */
+  | "disposed"
+  /** A real option, but the build step that implements it has not landed. */
+  | "not_implemented"
+  /** Anything the engine reported that has no name yet. */
+  | "engine";
 
 /**
  * A failure that came back from the engine, or from calling into one that
@@ -56,6 +63,16 @@ export class WasmStateError extends Error {
     if (status < 0) throw WasmStateError.fromStatus(status, op);
     return status;
   }
+}
+
+/** An option that type-checks but is not built yet. */
+export function notImplementedError(what: string, step: string): WasmStateError {
+  return new WasmStateError(
+    "not_implemented",
+    0,
+    what,
+    `use-wasm-state: ${what} is not implemented yet. It arrives in ${step}.`
+  );
 }
 
 /** The error a disposed store or engine throws, for any call made on it. */

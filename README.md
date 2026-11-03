@@ -95,8 +95,8 @@ Nothing else does.
 2. ~~Copy the `internal/wasm` helpers and their tests~~
 3. ~~Go `table` package: schema, insert, view~~
 4. ~~ABI in `main.go`, build, `abi.test.ts`~~
-5. `SyncClient` + `TableStore` + `useWasmTable` / `useTableView`
-6. Demo grid with 200k rows
+5. ~~`SyncClient` + `TableStore` + `useWasmTable` / `useTableView`~~
+6. ~~Demo grid with 200k rows~~
 7. Sort, filter, search in Go
 8. `WorkerClient` + worker mode
 9. Provider / shared tables

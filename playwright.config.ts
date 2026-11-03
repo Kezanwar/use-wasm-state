@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
 const PORT = 5174;
+const SUBPATH_PORT = 4178;
 const baseURL = `http://localhost:${PORT}`;
 
 /**
@@ -24,6 +25,15 @@ export default defineConfig({
       // dist/, so the package has to be built first.
       command: `pnpm build && pnpm --filter use-wasm-state-demo exec vite --port ${PORT} --strictPort`,
       url: baseURL,
+      reuseExistingServer: !process.env.CI,
+      timeout: 180_000,
+      stdout: "pipe",
+    },
+    {
+      // A production build served from a sub-directory, the way GitHub
+      // Pages does. See e2e/subpath.spec.ts.
+      command: `pnpm --filter use-wasm-state-demo build && node scripts/serve-subpath.mjs`,
+      url: `http://localhost:${SUBPATH_PORT}/use-wasm-state/`,
       reuseExistingServer: !process.env.CI,
       timeout: 180_000,
       stdout: "pipe",

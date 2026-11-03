@@ -6,7 +6,8 @@ import tailwindcss from "@tailwindcss/vite";
 export default defineConfig({
   // Relative, not "/". The demo deploys to GitHub Pages under a sub-path,
   // where an absolute "/engine.wasm" would 404. Relative keeps dev,
-  // `vite preview`, Playwright and Pages all working from one setting.
+  // `vite preview`, Playwright and Pages all working from one setting,
+  // and survives the repo being renamed.
   base: "./",
   plugins: [react(), tailwindcss()],
   resolve: {

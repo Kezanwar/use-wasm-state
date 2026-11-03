@@ -221,21 +221,58 @@ export function encodeStrings(values: readonly string[]): {
   blob: Uint8Array;
   offsets: Uint32Array;
 } {
-  const parts = values.map((v) => encoder.encode(v));
+  const count = values.length;
+  const offsets = new Uint32Array(count + 1);
 
-  let total = 0;
-  for (const part of parts) total += part.byteLength;
-
-  const blob = new Uint8Array(total);
-  const offsets = new Uint32Array(values.length + 1);
-
+  // Guess the blob at one byte per character, which is exact for the ASCII
+  // this is nearly always used on, plus headroom so the common case never
+  // regrows.
+  let guess = 16;
+  for (let i = 0; i < count; i++) guess += values[i]!.length;
+  let blob = new Uint8Array(guess + (guess >> 1));
   let at = 0;
-  for (let i = 0; i < parts.length; i++) {
-    blob.set(parts[i]!, at);
-    at += parts[i]!.byteLength;
+
+  for (let i = 0; i < count; i++) {
+    const text = values[i]!;
+    const length = text.length;
+
+    // Three bytes per UTF-16 unit is the worst a non-surrogate can encode
+    // to, and a surrogate pair is two units for four bytes, so this covers
+    // everything.
+    if (at + length * 3 > blob.length) {
+      const grown = new Uint8Array(Math.max(blob.length * 2, at + length * 3));
+      grown.set(blob.subarray(0, at));
+      blob = grown;
+    }
+
+    // The fast path: copy char codes straight in. Encoding 200k short
+    // ASCII strings through TextEncoder.encode means 200k Uint8Arrays the
+    // collector then has to walk, and it is the dominant cost of a bulk
+    // insert.
+    let ascii = true;
+    for (let c = 0; c < length; c++) {
+      const code = text.charCodeAt(c);
+      if (code > 127) {
+        ascii = false;
+        break;
+      }
+      blob[at + c] = code;
+    }
+
+    if (ascii) {
+      at += length;
+    } else {
+      // Anything else goes through the encoder, writing in place. The
+      // subarray is the only allocation on this path, and only for strings
+      // that actually need it.
+      at += encoder.encodeInto(text, blob.subarray(at)).written;
+    }
     offsets[i + 1] = at;
   }
-  return { blob, offsets };
+
+  // A view, not a copy: withInput writes it into the engine's input buffer
+  // straight from here.
+  return { blob: blob.subarray(0, at), offsets };
 }
 
 /**

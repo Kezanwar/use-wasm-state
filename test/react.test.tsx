@@ -2,7 +2,16 @@
 import { StrictMode, useState } from "react";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
-import { defineSchema, useTableView, useWasmTable, type TableStore } from "../src/index";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import {
+  defineSchema,
+  useTableStats,
+  useTableView,
+  useWasmTable,
+  WasmStateError,
+  type TableStore,
+} from "../src/index";
 import { ENGINE_URL, serveEngine } from "./helpers/engine";
 
 /**
@@ -140,22 +149,65 @@ describe("useWasmTable", () => {
     expect(warn).not.toHaveBeenCalled();
   });
 
-  it("throws a clear message for options that are not built yet", async () => {
-    const errors: unknown[] = [];
-    function Shared() {
-      try {
-        useWasmTable(schema, { wasmUrl: ENGINE_URL, shared: "orders" });
-      } catch (err) {
-        errors.push(err);
-      }
-      return <p>ok</p>;
+  it("reports an option that is not built yet through status, not a throw", async () => {
+    function Unsupported({ options }: { options: Record<string, unknown> }) {
+      const { status, error } = useWasmTable(schema, { wasmUrl: ENGINE_URL, ...options });
+      return <p data-testid="state">{status === "error" ? error.message : status}</p>;
     }
-    // The throw happens inside the effect, so React surfaces it rather
-    // than the try/catch above; catching it at the boundary is enough to
-    // prove it is loud.
-    const onError = vi.spyOn(console, "error").mockImplementation(() => {});
-    expect(() => render(<Shared />)).toThrowError(/shared is not implemented yet/);
-    onError.mockRestore();
+
+    for (const [label, options] of [
+      ["shared", { shared: "orders" }],
+      ["worker", { mode: "worker" }],
+    ] as const) {
+      const view = render(<Unsupported options={options} />);
+      await waitFor(() =>
+        expect(screen.getByTestId("state").textContent, label).toMatch(/not implemented yet/)
+      );
+      view.unmount();
+    }
+  });
+
+  it("gives that error the not_implemented code", async () => {
+    let caught: WasmStateError | null = null;
+    function Unsupported() {
+      const result = useWasmTable(schema, { wasmUrl: ENGINE_URL, shared: "orders" });
+      if (result.status === "error") caught = result.error as WasmStateError;
+      return <p>{result.status}</p>;
+    }
+    render(<Unsupported />);
+    // An unbuilt option is a failure of the hook, handled like a missing
+    // .wasm, rather than something needing an error boundary.
+    await waitFor(() => expect(caught).toBeInstanceOf(WasmStateError));
+    expect(caught!.code).toBe("not_implemented");
+  });
+
+  it("does not reload the engine when wasmUrl is rebuilt each render", async () => {
+    let engineLoads = 0;
+    const serve = vi.fn(async () => {
+      engineLoads++;
+      return new Response(readFileSync(resolve(process.cwd(), "src/wasm/engine.wasm")), {
+        headers: { "content-type": "application/wasm" },
+      });
+    });
+    vi.stubGlobal("fetch", serve);
+
+    function Inline() {
+      const [n, setN] = useState(0);
+      // A new URL object every render, same address. Depending on the
+      // object would tear the engine down and rebuild it each time.
+      const { status } = useWasmTable(schema, { wasmUrl: new URL(ENGINE_URL) });
+      return <button onClick={() => setN(n + 1)}>{`${status}${n}`}</button>;
+    }
+
+    render(<Inline />);
+    await waitFor(() => expect(screen.getByText("ready0")).toBeTruthy());
+    const after = engineLoads;
+
+    await act(async () => void screen.getByRole("button").click());
+    await act(async () => void screen.getByRole("button").click());
+
+    expect(engineLoads).toBe(after);
+    serveEngine();
   });
 });
 
@@ -285,5 +337,124 @@ describe("under StrictMode", () => {
 
     unmount();
     expect(() => table.rowCount).toThrowError(/disposed/);
+  });
+});
+
+describe("two windows on one table", () => {
+  /** Two consumers of the same table, each watching a different window. */
+  function TwoWindows({ onTable }: { onTable: (t: TableStore<Schema>) => void }) {
+    const { status, table } = useWasmTable(schema, {
+      wasmUrl: ENGINE_URL,
+      initialRows: Array.from({ length: 200 }, (_, i) => ({
+        id: i,
+        price: i + 0.5,
+        status: i % 2 ? "shipped" : "new",
+      })),
+    });
+    if (status !== "ready") return <p>loading</p>;
+    onTable(table);
+    return (
+      <>
+        <Window table={table} start={0} testid="top" />
+        <Window table={table} start={100} testid="bottom" />
+      </>
+    );
+  }
+
+  function Window({
+    table,
+    start,
+    testid,
+  }: {
+    table: TableStore<Schema>;
+    start: number;
+    testid: string;
+  }) {
+    const view = useTableView(table, start, 5);
+    return (
+      <p data-testid={testid}>
+        {view ? `${view.start}:${view.get(0, "id")}:${view.get(0, "price")}` : "none"}
+      </p>
+    );
+  }
+
+  it("keeps both snapshots correct and warns about neither", async () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const error = vi.spyOn(console, "error").mockImplementation(() => {});
+    let table!: TableStore<Schema>;
+
+    render(
+      <StrictMode>
+        <TwoWindows onTable={(t) => (table = t)} />
+      </StrictMode>
+    );
+    await waitFor(() => expect(screen.getByTestId("top")).toBeTruthy());
+
+    expect(screen.getByTestId("top").textContent).toBe("0:0:0.5");
+    expect(screen.getByTestId("bottom").textContent).toBe("100:100:100.5");
+
+    // The store caches one window. If a snapshot were the view object,
+    // these two would evict each other and React would complain that
+    // getSnapshot is not cached.
+    const complaints = [...warn.mock.calls, ...error.mock.calls]
+      .flat()
+      .filter((arg) => typeof arg === "string" && /getSnapshot/i.test(arg));
+    expect(complaints).toEqual([]);
+
+    await act(async () => table.setCell(100, "price", 9.75));
+
+    expect(screen.getByTestId("bottom").textContent).toBe("100:100:9.75");
+    expect(screen.getByTestId("top").textContent).toBe("0:0:0.5");
+  });
+});
+
+describe("useTableStats", () => {
+  function Stats({ onTable }: { onTable?: (t: TableStore<Schema>) => void }) {
+    const { status, table } = useWasmTable(schema, { wasmUrl: ENGINE_URL });
+    const stats = useTableStats(table);
+    if (status === "ready") onTable?.(table);
+    return (
+      <p data-testid="stats">
+        {stats ? `${stats.revision}/${stats.rowCount}/${stats.totalRows}` : "none"}
+      </p>
+    );
+  }
+
+  it("is null until the table exists, then tracks it", async () => {
+    let table!: TableStore<Schema>;
+    render(<Stats onTable={(t) => (table = t)} />);
+
+    expect(screen.getByTestId("stats").textContent).toBe("none");
+    await waitFor(() => expect(screen.getByTestId("stats").textContent).toBe("0/0/0"));
+
+    await act(async () => void table.insertRows([{ id: 1, price: 1, status: "new" }]));
+    expect(screen.getByTestId("stats").textContent).toBe("1/1/1");
+
+    await act(async () => table.deleteRows([0]));
+    // The tombstone stays, so totalRows holds where rowCount drops.
+    expect(screen.getByTestId("stats").textContent).toBe("2/0/1");
+  });
+
+  it("does not change identity while the revision holds", async () => {
+    let table!: TableStore<Schema>;
+    const seen: unknown[] = [];
+
+    function Watcher() {
+      const { status, table: t } = useWasmTable(schema, { wasmUrl: ENGINE_URL });
+      const stats = useTableStats(t);
+      seen.push(stats);
+      if (status === "ready") table = t;
+      return <p data-testid="n">{stats?.rowCount ?? -1}</p>;
+    }
+
+    render(<Watcher />);
+    await waitFor(() => expect(screen.getByTestId("n").textContent).toBe("0"));
+
+    const before = seen[seen.length - 1];
+    await act(async () => void table.insertRows([{ id: 1, price: 1, status: "new" }]));
+    const after = seen[seen.length - 1];
+
+    expect(after).not.toBe(before);
+    expect(after).toEqual({ revision: 1, rowCount: 1, totalRows: 1 });
   });
 });

@@ -1,47 +1,113 @@
-import { defineSchema } from "use-wasm-state";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useTableStats, useWasmTable } from "use-wasm-state";
+import { Grid, selectionRange } from "@/components/grid";
+import { StatusBar } from "@/components/status-bar";
+import { Toolbar } from "@/components/toolbar";
+import { useFrameRate } from "@/hooks/use-frame-rate";
+import { generateOrders, schema } from "@/lib/orders";
 
-/**
- * Placeholder. It exists to prove the wiring: the workspace link resolves,
- * the package's types come through, Tailwind and shadcn are set up.
- *
- * Replaced in build step 6 by the real thing, a 200k-row grid sorting and
- * filtering in Go.
- */
-const schema = defineSchema({ id: "i32", price: "f64", status: "string" });
+const INITIAL_ROWS = 200_000;
+const APPEND_ROWS = 10_000;
 
 export function App() {
-  return (
-    <main className="mx-auto flex min-h-dvh max-w-3xl flex-col justify-center gap-8 px-6 py-16">
-      <header className="flex flex-col gap-3">
-        <Badge variant="wasm">WebAssembly</Badge>
-        <h1 className="text-4xl font-extrabold tracking-tight">use-wasm-state</h1>
-        <p className="text-muted-foreground">
-          React state that lives in a WebAssembly engine written in Go. Specialised data structures
-          whose operations run in wasm; only what React renders crosses to JS.
+  const { status, table, error } = useWasmTable(schema);
+  const stats = useTableStats(table);
+  const fps = useFrameRate();
+
+  const [selection, setSelection] = useState<{ anchor: number; focus: number } | null>(null);
+  const [lastMs, setLastMs] = useState<number | null>(null);
+  const [busy, setBusy] = useState(false);
+  const loaded = useRef(false);
+
+  /** Run a store call and report what it cost. */
+  const timed = useCallback(<T,>(run: () => T): T => {
+    const started = performance.now();
+    const result = run();
+    setLastMs(performance.now() - started);
+    return result;
+  }, []);
+
+  // The initial load. Not initialRows, because the generator is the slow
+  // part and the status bar should show the insert on its own.
+  useEffect(() => {
+    if (!table || loaded.current) return;
+    loaded.current = true;
+
+    const columns = generateOrders(INITIAL_ROWS);
+    timed(() => table.insertColumns(columns));
+  }, [table, timed]);
+
+  const append = () => {
+    if (!table) return;
+    setBusy(true);
+    const columns = generateOrders(APPEND_ROWS, table.totalRows);
+    timed(() => table.insertColumns(columns));
+    setBusy(false);
+  };
+
+  const remove = () => {
+    if (!table || !selection) return;
+    const { from, to } = selectionRange(selection);
+    // Row ids, not offsets: offsets shift when rows go, ids never do.
+    const ids = table.view(from, to - from + 1).ids;
+    timed(() => table.deleteRows(ids));
+    setSelection(null);
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Delete" || event.key === "Backspace") {
+        if (selection && document.activeElement?.tagName !== "INPUT") {
+          event.preventDefault();
+          remove();
+        }
+      }
+    };
+    globalThis.addEventListener("keydown", onKeyDown);
+    return () => globalThis.removeEventListener("keydown", onKeyDown);
+  });
+
+  if (status === "error") {
+    return (
+      <main className="grid min-h-dvh place-items-center p-8">
+        <p className="max-w-md text-sm text-destructive" data-testid="error">
+          {error.message}
         </p>
-      </header>
+      </main>
+    );
+  }
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Scaffold</CardTitle>
-          <CardDescription>
-            Workspace, tooling and the copied wasm helpers. No engine yet.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="flex items-center gap-2 font-mono text-sm">
-          <span className="text-muted-foreground">columns</span>
-          <span data-testid="package-version" className="tabular text-wasm">
-            {schema.names.join(", ")}
-          </span>
-        </CardContent>
-      </Card>
+  const selectedCount = selection
+    ? selectionRange(selection).to - selectionRange(selection).from + 1
+    : 0;
 
-      <p className="text-sm text-muted-foreground">
-        Next: the Go <code className="font-mono text-foreground">table</code> package, then the ABI,
-        then a grid.
-      </p>
+  return (
+    <main className="flex h-dvh flex-col">
+      <Toolbar
+        selectedCount={selectedCount}
+        onAppend={append}
+        onDelete={remove}
+        busy={busy || status !== "ready"}
+      />
+
+      {status === "ready" && stats ? (
+        <Grid
+          table={table}
+          rowCount={stats.rowCount}
+          selection={selection}
+          onSelectionChange={setSelection}
+          onEdit={timed}
+        />
+      ) : (
+        <div className="flex-1" />
+      )}
+
+      <StatusBar
+        rowCount={stats?.rowCount ?? 0}
+        revision={stats?.revision ?? 0}
+        fps={fps}
+        lastMs={lastMs}
+      />
     </main>
   );
 }

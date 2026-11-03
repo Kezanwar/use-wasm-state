@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createEngine, type Engine } from "../store/create-engine";
+import { notImplementedError } from "../engine/errors";
 import { sameShape, type Row, type SchemaSpec, type TableSchema } from "../store/schema";
 import type { TableStore } from "../store/table-store";
 
@@ -53,6 +54,11 @@ export function useWasmTable<S extends SchemaSpec>(
 ): UseWasmTableResult<S> {
   const { wasmUrl, initialRows, shared, mode } = options;
 
+  // An inline `new URL(...)` is a different object every render but the
+  // same address. Depending on the string means it does not tear the
+  // engine down and build it again on each one.
+  const wasmUrlKey = wasmUrl === undefined ? undefined : String(wasmUrl);
+
   const [state, setState] = useState<UseWasmTableResult<S>>(LOADING);
 
   // Read once, on mount. Keeping them in a ref means a new options object
@@ -73,15 +79,20 @@ export function useWasmTable<S extends SchemaSpec>(
   }
 
   useEffect(() => {
-    if (shared !== undefined) {
-      throw new Error(
-        "use-wasm-state: options.shared is not implemented yet. It arrives in build step 9."
-      );
-    }
-    if (mode === "worker") {
-      throw new Error(
-        'use-wasm-state: mode "worker" is not implemented yet. It arrives in build step 8.'
-      );
+    // An option that type-checks but is not built yet is a failure of this
+    // hook, not of the render. Reporting it through status means a consumer
+    // handles it the same way it handles a missing .wasm, instead of
+    // needing an error boundary for a typo.
+    const unsupported =
+      shared !== undefined
+        ? notImplementedError("options.shared", "build step 9")
+        : mode === "worker"
+          ? notImplementedError('mode "worker"', "build step 8")
+          : null;
+
+    if (unsupported) {
+      setState({ status: "error", isReady: false, table: null, error: unsupported });
+      return;
     }
 
     // StrictMode mounts, unmounts and mounts again. The first engine is
@@ -94,7 +105,7 @@ export function useWasmTable<S extends SchemaSpec>(
 
     (async () => {
       try {
-        const created = await createEngine({ wasmUrl, mode: "sync" });
+        const created = await createEngine({ wasmUrl: wasmUrlKey, mode: "sync" });
         if (cancelled) {
           created.dispose();
           return;
@@ -129,7 +140,7 @@ export function useWasmTable<S extends SchemaSpec>(
       engine?.dispose();
       engine = null;
     };
-  }, [wasmUrl, shared, mode]);
+  }, [wasmUrlKey, shared, mode]);
 
   return state;
 }

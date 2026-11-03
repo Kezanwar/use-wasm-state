@@ -1,6 +1,6 @@
 import { renderToString } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { defineSchema, useTableView, useWasmTable } from "../src/index";
+import { defineSchema, useTableStats, useTableView, useWasmTable } from "../src/index";
 
 /**
  * Server rendering.
@@ -16,10 +16,12 @@ const schema = defineSchema({ id: "i32", price: "f64", status: "string" });
 function Grid() {
   const { status, table } = useWasmTable(schema);
   const view = useTableView(table, 0, 10);
+  const stats = useTableStats(table);
   return (
     <main>
       <span data-status={status}>{status}</span>
       <span data-rows={view === null ? "none" : String(view.length)} />
+      <span data-stats={stats === null ? "none" : String(stats.rowCount)} />
     </main>
   );
 }
@@ -31,6 +33,7 @@ describe("server rendering", () => {
     // useTableView falls back to its server snapshot, which is the same
     // null the client starts from, so hydration has nothing to reconcile.
     expect(html).toContain('data-rows="none"');
+    expect(html).toContain('data-stats="none"');
   });
 
   it("touches no browser globals", () => {
