@@ -68,7 +68,10 @@ export type ColumnInput =
   | { type: typeof ColumnType.F64; values: ArrayLike<number> }
   | { type: typeof ColumnType.String; values: readonly string[] };
 
-/** Append rows through appendRows, exactly as SyncClient does. */
+/**
+ * Append rows through appendRows, as SyncClient does, with dictionaries
+ * caught up from the engine afresh each call rather than kept.
+ */
 export function insertColumns(
   e: EngineExports,
   handle: number,
@@ -80,7 +83,8 @@ export function insertColumns(
     columns.map((column): ColumnValues => {
       if (column.type === ColumnType.String) return { kind: "string", values: column.values };
       return { kind: column.type === ColumnType.F64 ? "f64" : "i32", values: column.values };
-    })
+    }),
+    []
   );
 }
 

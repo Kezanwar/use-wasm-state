@@ -258,16 +258,19 @@ describe("insertColumns", () => {
     const revision = e.revision(h);
     const before = readView(e, h, 0, 10, SCHEMA)!;
 
-    // Strings short of the rows: rejected after the reserve, at the commit.
+    // A string id the dictionary does not have and no new string names:
+    // rejected after the reserve, at the commit.
     const status = withInput(
       e,
       [u32In(new Uint32Array(3)), u32In(new Uint32Array(12))],
       ([out, descs]) => {
         expect(e.reserveRows(h, 2, out.ptr, 3)).toBe(Status.OK);
+        const at = new Uint32Array(e.memory.buffer, out.ptr, 3);
+        new Int32Array(e.memory.buffer, at[2], 2).set([0, 99]);
         return e.commitRows(h, 2, descs.ptr, 3);
       }
     );
-    expect(status).toBe(Status.RowCount);
+    expect(status).toBe(Status.BadArgument);
 
     expect(e.totalRows(h)).toBe(10);
     expect(e.rowCount(h)).toBe(10);

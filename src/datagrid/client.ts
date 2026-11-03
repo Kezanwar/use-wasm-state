@@ -127,4 +127,10 @@ export interface SyncEngineClient extends EngineClient {
   rowCountSync(handle: number): number;
   totalRowsSync(handle: number): number;
   dictLenSync(handle: number, col: number): number;
+  /**
+   * A string column's dictionary, brought up to date, in id order. The
+   * same array every time, grown in place, so a holder stays current by
+   * calling this again after a change.
+   */
+  dictionarySync(handle: number, col: number): readonly string[];
 }

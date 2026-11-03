@@ -24,6 +24,9 @@ var (
 	// they carry. Setting the wrong field of a ColumnData reads as a column
 	// of length zero and surfaces here.
 	ErrRowCount = errors.New("datagrid: columns have different lengths")
+	// ErrNoSuchString means a committed string id is neither in the
+	// dictionary nor one of the strings sent with it.
+	ErrNoSuchString = errors.New("datagrid: string id is not in the dictionary")
 	// ErrEmptySchema means a grid was created with no columns. There would
 	// be nothing to infer a row count from.
 	ErrEmptySchema = errors.New("datagrid: schema has no columns")

@@ -150,15 +150,12 @@ var (
 	commitText  []datagrid.ColumnData
 )
 
-// commitRows adds the n rows written after reserveRows. descPtr points at
-// colCount descriptors in schema order; a string column's carries its rows
-// as text (see wire.ColumnDesc) and the others are zeros. Returns the first
-// row id, or a negative status. Atomic: everything is checked before
-// anything changes.
-//
-// The text is handed over packed rather than decoded into one Go string
-// per row. The dictionary keeps only the distinct values, so building 200k
-// strings to keep six would be 200k allocations thrown straight away.
+// commitRows adds the n rows written after reserveRows, a string column's
+// as dictionary ids. descPtr points at colCount descriptors in schema
+// order; a string column's carries the strings new to its dictionary that
+// the ids above its length name (see wire.ColumnDesc), and the others are
+// zeros. Returns the first row id, or a negative status. Atomic:
+// everything is checked before anything changes.
 //
 //go:wasmexport commitRows
 func commitRows(h, n int32, descPtr unsafe.Pointer, colCount int32) int32 {
@@ -184,10 +181,11 @@ func commitRows(h, n int32, descPtr unsafe.Pointer, colCount int32) int32 {
 			continue
 		}
 		d := &commitDescs[i]
-		// Offsets are read as RowCount+1 values, so a count that is not n
-		// is refused before a slice that long is made.
-		if n < 0 || d.RowCount != uint32(n) {
-			return wire.StatusOf(datagrid.ErrRowCount)
+		// Offsets are read as RowCount+1 values, so a count no append could
+		// need, more new strings than rows, is refused before a slice that
+		// long is made.
+		if n < 0 || d.RowCount > uint32(n) {
+			return abi.StatusBadArgument
 		}
 		offs := abi.PtrAt(d.OffsetsPtr)
 		if offs == nil || !abi.Aligned(offs) {

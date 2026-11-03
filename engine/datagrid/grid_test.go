@@ -710,47 +710,76 @@ func TestInsertGrowsEachColumnOnce(t *testing.T) {
 /* ------------------------------------------------------------------ */
 
 func TestReserveThenCommitAppendsWhatWasWritten(t *testing.T) {
-	tbl := fourRows(t)
+	tbl := fourRows(t) // status dictionary: new 0, shipped 1, held 2
 	slots, err := tbl.Reserve(2)
 	if err != nil {
 		t.Fatalf("Reserve: %v", err)
 	}
 	copy(slots[0].I32, []int32{50, 60})
 	copy(slots[1].F64, []float64{5.5, 6.5})
+	copy(slots[2].I32, []int32{2, 3}) // held, then the first string sent
 
-	first, err := tbl.Commit(2, []ColumnData{{}, {}, {Strings: []string{"held", "lost"}}})
+	first, err := tbl.Commit(2, []ColumnData{{}, {}, {Strings: []string{"lost"}}})
 	if err != nil || first != 4 {
 		t.Fatalf("Commit = %d, %v; want 4, nil", first, err)
 	}
 	if !equalI32(tbl.cols[0].i32[4:], []int32{50, 60}) || tbl.cols[1].f64[5] != 6.5 {
 		t.Fatalf("columns = %v, %v", tbl.cols[0].i32, tbl.cols[1].f64)
 	}
-	if got := tbl.cols[2].dict.values[tbl.cols[2].i32[5]]; got != "lost" {
-		t.Fatalf("string = %q, want lost", got)
+	if !equalI32(tbl.cols[2].i32[4:], []int32{2, 3}) || tbl.cols[2].dict.values[3] != "lost" {
+		t.Fatalf("string ids = %v, dictionary = %v", tbl.cols[2].i32[4:], tbl.cols[2].dict.values)
+	}
+}
+
+func TestCommitFoldsStringsTheDictionaryAlreadyHolds(t *testing.T) {
+	tbl := fourRows(t) // status dictionary: new 0, shipped 1, held 2
+	slots, err := tbl.Reserve(4)
+	if err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
+	// Sent as new: "held", which the dictionary has, "lost", and "lost"
+	// again, the way two lone surrogates arrive as the same bytes.
+	copy(slots[2].I32, []int32{3, 4, 5, 0})
+	added := ColumnData{Blob: []byte("heldlostlost"), Offsets: []int32{0, 4, 8, 12}}
+
+	if _, err := tbl.Commit(4, []ColumnData{{}, {}, added}); err != nil {
+		t.Fatalf("Commit: %v", err)
+	}
+	if got := tbl.cols[2].dict.values; len(got) != 4 || got[3] != "lost" {
+		t.Fatalf("dictionary = %v, want [new shipped held lost]", got)
+	}
+	if !equalI32(tbl.cols[2].i32[4:], []int32{2, 3, 3, 0}) {
+		t.Fatalf("ids = %v, want [2 3 3 0]", tbl.cols[2].i32[4:])
 	}
 }
 
 func TestRejectedCommitLeavesTheGridUntouched(t *testing.T) {
+	two := []int32{0, 1}
 	cases := []struct {
-		name string
-		n    int32
-		text []ColumnData
+		name  string
+		n     int32
+		ids   []int32
+		added []ColumnData
+		want  error
 	}{
-		{"more rows than reserved", 3, []ColumnData{{}, {}, {Strings: []string{"a", "b", "c"}}}},
-		{"strings short of the rows", 2, []ColumnData{{}, {}, {Strings: []string{"a"}}}},
-		{"offsets past the blob", 2, []ColumnData{{}, {}, {Blob: []byte("ab"), Offsets: []int32{0, 1, 9}}}},
-		{"offsets running backwards", 2, []ColumnData{{}, {}, {Blob: []byte("ab"), Offsets: []int32{0, 2, 1}}}},
-		{"wrong column count", 2, []ColumnData{{}, {}}},
+		{"more rows than reserved", 3, two, []ColumnData{{}, {}, {}}, ErrRowCount},
+		{"an id past the strings sent", 2, []int32{0, 4}, []ColumnData{{}, {}, {Strings: []string{"a"}}}, ErrNoSuchString},
+		{"a negative id", 2, []int32{-1, 0}, []ColumnData{{}, {}, {}}, ErrNoSuchString},
+		{"offsets past the blob", 2, two, []ColumnData{{}, {}, {Blob: []byte("ab"), Offsets: []int32{0, 9}}}, ErrRowCount},
+		{"offsets running backwards", 2, two, []ColumnData{{}, {}, {Blob: []byte("ab"), Offsets: []int32{0, 2, 1}}}, ErrRowCount},
+		{"wrong column count", 2, two, []ColumnData{{}, {}}, ErrColumnCount},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			tbl := fourRows(t)
 			rev, dict := tbl.Revision(), tbl.cols[2].dict.len()
-			if _, err := tbl.Reserve(2); err != nil {
+			slots, err := tbl.Reserve(2)
+			if err != nil {
 				t.Fatalf("Reserve: %v", err)
 			}
-			if _, err := tbl.Commit(tc.n, tc.text); err == nil {
-				t.Fatal("expected an error")
+			copy(slots[2].I32, tc.ids)
+			if _, err := tbl.Commit(tc.n, tc.added); !errors.Is(err, tc.want) {
+				t.Fatalf("Commit = %v, want %v", err, tc.want)
 			}
 			if tbl.TotalRows() != 4 || tbl.RowCount() != 4 || tbl.Revision() != rev || tbl.cols[2].dict.len() != dict {
 				t.Fatalf("grid changed: rows %d, live %d, revision %d, dictionary %d",

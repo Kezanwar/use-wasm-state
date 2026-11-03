@@ -40,9 +40,11 @@ type Grid struct {
 
 	// slots is what Reserve last returned, kept so an append does not
 	// allocate the slice that describes it, and reserved is how many rows
-	// it made room for: the only count Commit accepts.
+	// it made room for: the only count Commit accepts. remap is Commit's
+	// scratch for the ids new strings actually got.
 	slots    []ColumnData
 	reserved int32
+	remap    []int32
 
 	// parsed is the query as a struct, for reading and applying; query is
 	// the same thing flattened to bytes, for telling one query from
@@ -75,8 +77,9 @@ const revisionMask uint32 = 0x7fffffff
 
 func nextRevision(r uint32) uint32 { return (r + 1) & revisionMask }
 
-// ColumnData carries one column's worth of rows: new rows for InsertColumns,
-// text for Commit, or the reserved space Reserve hands back.
+// ColumnData carries one column's worth of values: new rows for
+// InsertColumns, the strings sent with Commit, or the reserved space
+// Reserve hands back.
 // Exactly one field is set, matching that column's type. Strings are
 // interned on the way in; the caller never sees an id.
 //
@@ -206,6 +209,13 @@ func (t *Grid) InsertColumns(data []ColumnData) (firstRowID int32, err error) {
 			copy(slots[i].I32, data[i].I32)
 		case F64:
 			copy(slots[i].F64, data[i].F64)
+		case String:
+			// Every row's string is sent as new, row j's as the j-th, and
+			// Commit folds the ones the dictionary already holds.
+			base := t.cols[i].dict.len()
+			for j := range slots[i].I32 {
+				slots[i].I32[j] = base + int32(j)
+			}
 		}
 	}
 	return t.Commit(n, data)
@@ -249,12 +259,19 @@ func (t *Grid) Reserve(n int32) ([]ColumnData, error) {
 // Commit adds the n rows written into the slices Reserve returned, and
 // returns the id of the first. n must be what Reserve was given.
 //
-// Numeric values are already in place; their entries in text are ignored.
-// A string column's entry carries its rows as text, Strings or packed, and
-// they are interned into the reserved ids here. Everything is checked
-// before anything changes, so a rejected commit leaves the grid as it was.
-func (t *Grid) Commit(n int32, text []ColumnData) (firstRowID int32, err error) {
-	if len(text) != len(t.cols) {
+// Every value is already in place, a string column's as dictionary ids.
+// An id below the dictionary's length is an entry it holds; the ones above
+// name, in order, the strings in that column's entry of added, Strings or
+// packed. Those are checked against the dictionary here rather than
+// trusted: two strings JS tells apart can be the same bytes (lone
+// surrogates both encode to U+FFFD), and the dictionary must never hold a
+// value twice, so a string it already has keeps its id and the rows naming
+// it are remapped. Numeric entries of added are ignored.
+//
+// Everything is checked before anything changes, so a rejected commit
+// leaves the grid as it was.
+func (t *Grid) Commit(n int32, added []ColumnData) (firstRowID int32, err error) {
+	if len(added) != len(t.cols) {
 		return 0, ErrColumnCount
 	}
 	if n < 0 || n > math.MaxInt32-t.rows {
@@ -270,12 +287,15 @@ func (t *Grid) Commit(n int32, text []ColumnData) (firstRowID int32, err error) 
 		if c.typ != String {
 			continue
 		}
-		if columnLen(&text[i], String) != n {
-			return 0, ErrRowCount
-		}
-		if text[i].packed() {
-			if err := checkOffsets(&text[i]); err != nil {
+		if added[i].packed() {
+			if err := checkOffsets(&added[i]); err != nil {
 				return 0, err
+			}
+		}
+		limit := c.dict.len() + columnLen(&added[i], String)
+		for _, id := range c.i32[t.rows:total] {
+			if uint32(id) >= uint32(limit) {
+				return 0, ErrNoSuchString
 			}
 		}
 	}
@@ -292,24 +312,8 @@ func (t *Grid) Commit(n int32, text []ColumnData) (firstRowID int32, err error) 
 			continue
 		}
 		c.i32 = c.i32[:total]
-		if c.typ != String {
-			continue
-		}
-		// Interning is the expensive part of a large insert: one hash and
-		// one comparison per cell. It buys a column that is four bytes a
-		// row however long the strings are, and a dictionary JS fetches
-		// once instead of a string per cell per frame.
-		c.dict.sizeHint(n)
-		ids := c.i32[first:]
-		if text[i].packed() {
-			blob, offs := text[i].Blob, text[i].Offsets
-			for j := int32(0); j < n; j++ {
-				ids[j] = c.dict.internBytes(blob[offs[j]:offs[j+1]])
-			}
-		} else {
-			for j, v := range text[i].Strings {
-				ids[j] = c.dict.intern(v)
-			}
+		if c.typ == String {
+			t.addStrings(c, &added[i], c.i32[first:])
 		}
 	}
 
@@ -328,6 +332,35 @@ func (t *Grid) Commit(n int32, text []ColumnData) (firstRowID int32, err error) 
 		t.order = append(t.order, id)
 	}
 	return first, nil
+}
+
+// addStrings interns the strings sent with a commit and, if any turned out
+// to be in the dictionary already, points the rows naming them at the
+// entry it holds. Usually none do and the rows are left alone.
+func (t *Grid) addStrings(c *column, added *ColumnData, ids []int32) {
+	base := c.dict.len()
+	count := columnLen(added, String)
+	c.dict.sizeHint(count)
+	t.remap = t.remap[:0]
+	moved := false
+	for j := int32(0); j < count; j++ {
+		var id int32
+		if added.packed() {
+			id = c.dict.internBytes(added.Blob[added.Offsets[j]:added.Offsets[j+1]])
+		} else {
+			id = c.dict.intern(added.Strings[j])
+		}
+		t.remap = append(t.remap, id)
+		moved = moved || id != base+j
+	}
+	if !moved {
+		return
+	}
+	for r, id := range ids {
+		if id >= base {
+			ids[r] = t.remap[id-base]
+		}
+	}
 }
 
 // columnLen is how many rows a ColumnData carries for a column of this type.

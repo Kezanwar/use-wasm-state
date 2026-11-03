@@ -137,6 +137,32 @@ describe("appending in the worker", () => {
   });
 });
 
+describe("strings interned in the worker", () => {
+  it("reuses, adds, keeps non-ASCII text and folds lone surrogates", async () => {
+    const { grid } = await store();
+    await grid.insertColumns({
+      id: [1, 2, 3, 4],
+      price: [1, 2, 3, 4],
+      status: ["café", "\uD800", "\uDC00", "日本語"],
+    });
+    await grid.insertRows([
+      { id: 5, price: 5, status: "café" },
+      { id: 6, price: 6, status: "\uFFFD" },
+      { id: 7, price: 7, status: "new" },
+    ]);
+
+    const stop = grid.watch(0, 7);
+    await vi.waitFor(() => expect(grid.view(0, 7).length).toBe(7));
+    expect(
+      grid
+        .view(0, 7)
+        .rows()
+        .map((row) => row.status)
+    ).toEqual(["café", "\uFFFD", "\uFFFD", "日本語", "café", "\uFFFD", "new"]);
+    stop();
+  });
+});
+
 describe("queries", () => {
   it("sorts, filters and searches", async () => {
     const { grid } = await seeded();

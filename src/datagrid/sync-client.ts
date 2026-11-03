@@ -12,7 +12,6 @@
 
 import {
   ColumnType,
-  decodeDict,
   decodeView,
   encodeQuery,
   encodeSchema,
@@ -26,6 +25,7 @@ import { disposedError } from "../core/errors";
 import { unpack } from "../core/wasm/memory";
 import { bytesIn, i32In, stringIn, withInput } from "../core/wasm/input";
 import { appendRows } from "./append";
+import { catchUp, emptyDictionary, readDictSince, type Dictionary } from "./dictionary";
 import { check, engineError } from "./errors";
 
 export class SyncClient implements SyncEngineClient {
@@ -61,11 +61,25 @@ export class SyncClient implements SyncEngineClient {
     return this.#exports;
   }
 
+  /**
+   * Each grid's string dictionaries as this side knows them, by column.
+   * Appends intern against them and the stores read strings out of them,
+   * so one copy serves both and is decoded once.
+   */
+  #dictionaries = new Map<number, (Dictionary | undefined)[]>();
+
+  #dictionariesOf(handle: number): (Dictionary | undefined)[] {
+    let dictionaries = this.#dictionaries.get(handle);
+    if (!dictionaries) this.#dictionaries.set(handle, (dictionaries = []));
+    return dictionaries;
+  }
+
   dispose(): void {
     // Nothing to release: the module's memory goes when the instance is
     // dropped. Clearing the reference is what makes later calls say so
     // rather than read a grid that no longer means anything.
     this.#exports = null;
+    this.#dictionaries.clear();
   }
 
   /* ---------------------------------------------------------------- */
@@ -86,13 +100,14 @@ export class SyncClient implements SyncEngineClient {
   dropGridSync(handle: number): void {
     const e = this.#e("dropGrid");
     check(e.dropGrid(handle), "dropGrid");
+    this.#dictionaries.delete(handle);
   }
 
   /** Append rows. See appendRows for how they get into the engine. */
   insertColumnsSync(handle: number, columns: readonly ColumnValues[]): number {
     const e = this.#e("insertColumns");
     return check(
-      this.#timed(() => appendRows(e, handle, columns)),
+      this.#timed(() => appendRows(e, handle, columns, this.#dictionariesOf(handle))),
       "insertColumns"
     );
   }
@@ -167,10 +182,17 @@ export class SyncClient implements SyncEngineClient {
 
   dictSinceSync(handle: number, col: number, from: number): string[] {
     const e = this.#e("dictSince");
-    const packed = e.dictSince(handle, col, from);
-    if (packed === 0n) throw engineError(-1, "dictSince");
-    const { ptr, len } = unpack(packed);
-    return decodeDict(new Uint8Array(e.memory.buffer, ptr, len));
+    const values = readDictSince(e, handle, col, from);
+    if (!values) throw engineError(-1, "dictSince");
+    return values;
+  }
+
+  dictionarySync(handle: number, col: number): readonly string[] {
+    const e = this.#e("dictionary");
+    const dictionaries = this.#dictionariesOf(handle);
+    const dictionary = (dictionaries[col] ??= emptyDictionary());
+    check(catchUp(e, handle, col, dictionary), "dictionary");
+    return dictionary.values;
   }
 
   revisionSync(handle: number): number {

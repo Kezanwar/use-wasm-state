@@ -11,10 +11,12 @@ const DescSize = 16
 
 // ColumnDesc is one column's entry in what commitRows is given.
 //
-// Numeric columns are already written in place by then, and their entry is
-// zeros. A string column's carries its rows as text: DataLen is the byte
-// length of one UTF-8 blob at DataPtr, and OffsetsPtr points at RowCount+1
-// u32 byte offsets into it, so row i is blob[offsets[i]:offsets[i+1]].
+// Every column is written in place by then, a string column's as
+// dictionary ids, and a numeric column's entry is zeros. A string column's
+// carries the RowCount strings new to its dictionary, in the order the ids
+// past its end name them: DataLen is the byte length of one UTF-8 blob at
+// DataPtr, and OffsetsPtr points at RowCount+1 u32 byte offsets into it, so
+// string i is blob[offsets[i]:offsets[i+1]].
 type ColumnDesc struct {
 	DataPtr    uint32
 	DataLen    uint32
