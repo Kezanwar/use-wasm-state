@@ -4,9 +4,8 @@ import { engineWasmBytes } from "../helpers/wat";
 /**
  * Guards the committed src/datagrid/datagrid.wasm.
  *
- * Empty of logic for now, so this only checks the shape the whole design
- * rests on: a reactor module that imports nothing. The per-export tests
- * arrive with the ABI in build step 4 (test/abi.test.ts).
+ * Only the shape the whole design rests on: a reactor module that imports
+ * nothing. The per-export tests are in test/datagrid/abi.test.ts.
  */
 
 describe("src/datagrid/datagrid.wasm", () => {

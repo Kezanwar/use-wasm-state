@@ -2,18 +2,18 @@
  * The exact shape src/datagrid/datagrid.wasm is expected to have.
  *
  * One source of truth for the audit: scripts/inspect-wasm.mjs reads it, and
- * src/engine/abi.ts declares the same ABI names in ENGINE_EXPORTS. An export
+ * src/datagrid/abi.ts declares the same ABI names in ENGINE_EXPORTS. An export
  * appearing here that is not in abi.ts, or the other way round, means the
  * module and its bindings have drifted.
  */
 
-/** Everything main.go marks //go:wasmexport, in declaration order. */
+/** Everything engine/cmd/datagrid/main.go marks //go:wasmexport, in declaration order. */
 export const ABI_EXPORTS = [
   "inputBuffer",
   "alloc",
   "free",
-  "createTable",
-  "dropTable",
+  "createGrid",
+  "dropGrid",
   "insertColumns",
   "setCellI32",
   "setCellF64",

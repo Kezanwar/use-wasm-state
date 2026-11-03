@@ -17,16 +17,16 @@ afterAll(() => vi.unstubAllGlobals());
 
 async function store() {
   const engine = await loadSyncEngine({ wasmUrl: ENGINE_URL });
-  return { engine, table: engine.createGrid(schema) };
+  return { engine, grid: engine.createGrid(schema) };
 }
 
 const ROW = (i: number) => ({ id: i, price: i + 0.5, status: i % 2 ? "shipped" : "new" });
 
 describe("inserting", () => {
   it("takes rows as objects and gives back their ids", async () => {
-    const { table } = await store();
+    const { grid } = await store();
 
-    const ids = table.insertRows([ROW(0), ROW(1), ROW(2)]);
+    const ids = grid.insertRows([ROW(0), ROW(1), ROW(2)]);
     expect(ids.first).toBe(0);
     expect(ids.length).toBe(3);
     expect([...ids]).toEqual([0, 1, 2]);
@@ -34,22 +34,22 @@ describe("inserting", () => {
     expect(ids.at(9)).toBeUndefined();
     expect(ids.toArray()).toEqual([0, 1, 2]);
 
-    expect(table.rowCount).toBe(3);
-    expect(table.totalRows).toBe(3);
+    expect(grid.rowCount).toBe(3);
+    expect(grid.totalRows).toBe(3);
   });
 
   it("carries on from the last row id", async () => {
-    const { table } = await store();
-    table.insertRows([ROW(0), ROW(1)]);
-    const second = table.insertRows([ROW(2)]);
+    const { grid } = await store();
+    grid.insertRows([ROW(0), ROW(1)]);
+    const second = grid.insertRows([ROW(2)]);
     expect(second.first).toBe(2);
-    expect(table.rowCount).toBe(3);
+    expect(grid.rowCount).toBe(3);
   });
 
   it("takes columns directly, including typed arrays", async () => {
-    const { table } = await store();
+    const { grid } = await store();
 
-    const ids = table.insertColumns({
+    const ids = grid.insertColumns({
       id: Int32Array.from([10, 20, 30]),
       price: Float64Array.from([1.5, 2.5, 3.5]),
       status: ["new", "shipped", "new"],
@@ -58,7 +58,7 @@ describe("inserting", () => {
     expect(ids.first).toBe(0);
     expect(ids.length).toBe(3);
 
-    const view = table.view(0, 3);
+    const view = grid.view(0, 3);
     expect([...view.ids]).toEqual([0, 1, 2]);
     expect(view.get(1, "id")).toBe(20);
     expect(view.get(1, "price")).toBe(2.5);
@@ -66,16 +66,16 @@ describe("inserting", () => {
   });
 
   it("accepts plain arrays for columns too", async () => {
-    const { table } = await store();
-    table.insertColumns({ id: [1, 2], price: [1, 2], status: ["a", "b"] });
-    expect(table.rowCount).toBe(2);
-    expect(table.view(0, 2).get(0, "status")).toBe("a");
+    const { grid } = await store();
+    grid.insertColumns({ id: [1, 2], price: [1, 2], status: ["a", "b"] });
+    expect(grid.rowCount).toBe(2);
+    expect(grid.view(0, 2).get(0, "status")).toBe("a");
   });
 
   it("rejects ragged columns with a typed error", async () => {
-    const { table } = await store();
+    const { grid } = await store();
     try {
-      table.insertColumns({ id: [1, 2], price: [1], status: ["a", "b"] });
+      grid.insertColumns({ id: [1, 2], price: [1], status: ["a", "b"] });
       expect.unreachable("should have thrown");
     } catch (err) {
       expect(err).toBeInstanceOf(WasmStateError);
@@ -83,28 +83,28 @@ describe("inserting", () => {
       expect((err as WasmStateError).op).toBe("insertColumns");
       expect((err as WasmStateError).status).toBe(-5);
     }
-    expect(table.rowCount).toBe(0);
+    expect(grid.rowCount).toBe(0);
   });
 });
 
 describe("reading", () => {
   it("clamps a window and reports where it really starts", async () => {
-    const { table } = await store();
-    table.insertRows([ROW(0), ROW(1), ROW(2), ROW(3)]);
+    const { grid } = await store();
+    grid.insertRows([ROW(0), ROW(1), ROW(2), ROW(3)]);
 
-    expect(table.view(0, 2).length).toBe(2);
-    expect(table.view(2, 10).length).toBe(2);
-    expect(table.view(2, 10).start).toBe(2);
-    expect(table.view(99, 10).length).toBe(0);
-    expect(table.view(99, 10).start).toBe(4);
-    expect(table.view(-5, 2).start).toBe(0);
+    expect(grid.view(0, 2).length).toBe(2);
+    expect(grid.view(2, 10).length).toBe(2);
+    expect(grid.view(2, 10).start).toBe(2);
+    expect(grid.view(99, 10).length).toBe(0);
+    expect(grid.view(99, 10).start).toBe(4);
+    expect(grid.view(-5, 2).start).toBe(0);
   });
 
   it("builds row objects only when asked", async () => {
-    const { table } = await store();
-    table.insertRows([ROW(0), ROW(1)]);
+    const { grid } = await store();
+    grid.insertRows([ROW(0), ROW(1)]);
 
-    const view = table.view(0, 2);
+    const view = grid.view(0, 2);
     expect(view.row(0)).toEqual({ id: 0, price: 0.5, status: "new" });
     expect(view.rows()).toEqual([
       { id: 0, price: 0.5, status: "new" },
@@ -113,46 +113,46 @@ describe("reading", () => {
   });
 
   it("throws for a column that is not in the schema", async () => {
-    const { table } = await store();
-    table.insertRows([ROW(0)]);
+    const { grid } = await store();
+    grid.insertRows([ROW(0)]);
     // @ts-expect-error -- not a column of this schema
-    expect(() => table.view(0, 1).get(0, "nope")).toThrowError(/no column named/);
+    expect(() => grid.view(0, 1).get(0, "nope")).toThrowError(/no column named/);
   });
 });
 
 describe("editing", () => {
   it("writes each column type by name", async () => {
-    const { table } = await store();
-    table.insertRows([ROW(0), ROW(1)]);
+    const { grid } = await store();
+    grid.insertRows([ROW(0), ROW(1)]);
 
-    table.setCell(1, "id", 99);
-    table.setCell(1, "price", 9.75);
-    table.setCell(1, "status", "cancelled");
+    grid.setCell(1, "id", 99);
+    grid.setCell(1, "price", 9.75);
+    grid.setCell(1, "status", "cancelled");
 
-    const view = table.view(0, 2);
+    const view = grid.view(0, 2);
     expect(view.get(1, "id")).toBe(99);
     expect(view.get(1, "price")).toBe(9.75);
     expect(view.get(1, "status")).toBe("cancelled");
   });
 
   it("writes a whole number into an f64 column as a float", async () => {
-    const { table } = await store();
-    table.insertRows([ROW(0)]);
+    const { grid } = await store();
+    grid.insertRows([ROW(0)]);
     // The column kind comes from the schema, not from the value: guessing
     // i32 because 7 is a whole number would truncate the column.
-    table.setCell(0, "price", 7);
-    expect(table.view(0, 1).get(0, "price")).toBe(7);
-    table.setCell(0, "price", 7.25);
-    expect(table.view(0, 1).get(0, "price")).toBe(7.25);
+    grid.setCell(0, "price", 7);
+    expect(grid.view(0, 1).get(0, "price")).toBe(7);
+    grid.setCell(0, "price", 7.25);
+    expect(grid.view(0, 1).get(0, "price")).toBe(7.25);
   });
 
   it("reports a deleted row as a typed error", async () => {
-    const { table } = await store();
-    table.insertRows([ROW(0), ROW(1)]);
-    table.deleteRows([1]);
+    const { grid } = await store();
+    grid.insertRows([ROW(0), ROW(1)]);
+    grid.deleteRows([1]);
 
     try {
-      table.setCell(1, "id", 5);
+      grid.setCell(1, "id", 5);
       expect.unreachable("should have thrown");
     } catch (err) {
       expect((err as WasmStateError).code).toBe("row-deleted");
@@ -161,14 +161,14 @@ describe("editing", () => {
   });
 
   it("deletes without moving surviving row ids", async () => {
-    const { table } = await store();
-    table.insertRows([ROW(0), ROW(1), ROW(2), ROW(3)]);
+    const { grid } = await store();
+    grid.insertRows([ROW(0), ROW(1), ROW(2), ROW(3)]);
 
-    table.deleteRows([0, 2]);
-    expect(table.rowCount).toBe(2);
-    expect(table.totalRows).toBe(4);
+    grid.deleteRows([0, 2]);
+    expect(grid.rowCount).toBe(2);
+    expect(grid.totalRows).toBe(4);
 
-    const view = table.view(0, 10);
+    const view = grid.view(0, 10);
     expect([...view.ids]).toEqual([1, 3]);
     expect(view.get(0, "id")).toBe(1);
   });
@@ -176,126 +176,126 @@ describe("editing", () => {
 
 describe("the dictionary mirror", () => {
   it("resolves strings inserted in bulk", async () => {
-    const { table } = await store();
+    const { grid } = await store();
     const labels = ["new", "paid", "picked", "shipped"];
-    table.insertColumns({
+    grid.insertColumns({
       id: labels.map((_, i) => i),
       price: labels.map((_, i) => i),
       status: labels,
     });
 
-    const view = table.view(0, 4);
+    const view = grid.view(0, 4);
     expect(view.rows().map((r) => r.status)).toEqual(labels);
   });
 
   it("picks up a string an edit introduced", async () => {
-    const { table } = await store();
-    table.insertRows([ROW(0), ROW(1)]);
+    const { grid } = await store();
+    grid.insertRows([ROW(0), ROW(1)]);
 
-    table.setCell(0, "status", "a value the column has never held");
-    expect(table.view(0, 1).get(0, "status")).toBe("a value the column has never held");
+    grid.setCell(0, "status", "a value the column has never held");
+    expect(grid.view(0, 1).get(0, "status")).toBe("a value the column has never held");
   });
 
   it("picks up strings a later insert introduced", async () => {
-    const { table } = await store();
-    table.insertRows([ROW(0)]);
-    table.insertRows([{ id: 1, price: 1, status: "later" }]);
-    expect(table.view(1, 1).get(0, "status")).toBe("later");
+    const { grid } = await store();
+    grid.insertRows([ROW(0)]);
+    grid.insertRows([{ id: 1, price: 1, status: "later" }]);
+    expect(grid.view(1, 1).get(0, "status")).toBe("later");
   });
 
   it("keeps resolving values it already knew", async () => {
-    const { table } = await store();
-    table.insertRows([ROW(0), ROW(1)]);
-    table.setCell(0, "status", "brand new");
+    const { grid } = await store();
+    grid.insertRows([ROW(0), ROW(1)]);
+    grid.setCell(0, "status", "brand new");
     // The mirror is appended to, never rebuilt, so the original entries
     // must still mean what they did.
-    expect(table.view(1, 1).get(0, "status")).toBe("shipped");
+    expect(grid.view(1, 1).get(0, "status")).toBe("shipped");
   });
 });
 
 describe("view caching", () => {
   it("returns the identical object for the same window and revision", async () => {
-    const { table } = await store();
-    table.insertRows([ROW(0), ROW(1), ROW(2)]);
+    const { grid } = await store();
+    grid.insertRows([ROW(0), ROW(1), ROW(2)]);
 
-    const first = table.view(0, 2);
-    expect(table.view(0, 2)).toBe(first);
+    const first = grid.view(0, 2);
+    expect(grid.view(0, 2)).toBe(first);
   });
 
   it("returns a new object once the revision moves", async () => {
-    const { table } = await store();
-    table.insertRows([ROW(0), ROW(1)]);
+    const { grid } = await store();
+    grid.insertRows([ROW(0), ROW(1)]);
 
-    const before = table.view(0, 2);
-    table.setCell(0, "id", 42);
-    const after = table.view(0, 2);
+    const before = grid.view(0, 2);
+    grid.setCell(0, "id", 42);
+    const after = grid.view(0, 2);
 
     expect(after).not.toBe(before);
     expect(after.get(0, "id")).toBe(42);
   });
 
   it("returns a new object for a different window", async () => {
-    const { table } = await store();
-    table.insertRows([ROW(0), ROW(1), ROW(2)]);
+    const { grid } = await store();
+    grid.insertRows([ROW(0), ROW(1), ROW(2)]);
 
-    const first = table.view(0, 2);
-    const moved = table.view(1, 2);
+    const first = grid.view(0, 2);
+    const moved = grid.view(1, 2);
     expect(moved).not.toBe(first);
     // Only the most recent window is kept, so going back re-reads.
-    expect(table.view(0, 2)).not.toBe(first);
+    expect(grid.view(0, 2)).not.toBe(first);
   });
 });
 
 describe("subscriptions", () => {
   it("notifies after a mutation that changed something", async () => {
-    const { table } = await store();
+    const { grid } = await store();
     const listener = vi.fn();
-    table.subscribe(listener);
+    grid.subscribe(listener);
 
-    table.insertRows([ROW(0)]);
+    grid.insertRows([ROW(0)]);
     expect(listener).toHaveBeenCalledTimes(1);
 
-    table.setCell(0, "id", 9);
+    grid.setCell(0, "id", 9);
     expect(listener).toHaveBeenCalledTimes(2);
 
-    table.deleteRows([0]);
+    grid.deleteRows([0]);
     expect(listener).toHaveBeenCalledTimes(3);
   });
 
   it("stays quiet for a mutation that changed nothing", async () => {
-    const { table } = await store();
-    table.insertRows([ROW(0)]);
+    const { grid } = await store();
+    grid.insertRows([ROW(0)]);
 
     const listener = vi.fn();
-    table.subscribe(listener);
+    grid.subscribe(listener);
 
     // Nothing to do, so nothing to re-render.
-    table.insertRows([]);
-    table.deleteRows([]);
-    table.insertColumns({ id: [], price: [], status: [] });
+    grid.insertRows([]);
+    grid.deleteRows([]);
+    grid.insertColumns({ id: [], price: [], status: [] });
     expect(listener).not.toHaveBeenCalled();
   });
 
   it("stays quiet for a rejected mutation", async () => {
-    const { table } = await store();
-    table.insertRows([ROW(0)]);
+    const { grid } = await store();
+    grid.insertRows([ROW(0)]);
 
     const listener = vi.fn();
-    table.subscribe(listener);
+    grid.subscribe(listener);
 
-    expect(() => table.setCell(99, "id", 1)).toThrow();
+    expect(() => grid.setCell(99, "id", 1)).toThrow();
     expect(listener).not.toHaveBeenCalled();
-    expect(table.revision).toBe(1);
+    expect(grid.revision).toBe(1);
   });
 
   it("stops notifying after unsubscribe", async () => {
-    const { table } = await store();
+    const { grid } = await store();
     const listener = vi.fn();
-    const off = table.subscribe(listener);
+    const off = grid.subscribe(listener);
 
-    table.insertRows([ROW(0)]);
+    grid.insertRows([ROW(0)]);
     off();
-    table.insertRows([ROW(1)]);
+    grid.insertRows([ROW(1)]);
 
     expect(listener).toHaveBeenCalledTimes(1);
   });
@@ -303,19 +303,19 @@ describe("subscriptions", () => {
 
 describe("disposal", () => {
   it("makes every later call throw", async () => {
-    const { table } = await store();
-    table.insertRows([ROW(0)]);
-    table.dispose();
+    const { grid } = await store();
+    grid.insertRows([ROW(0)]);
+    grid.dispose();
 
     const calls: Array<[string, () => unknown]> = [
-      ["insertRows", () => table.insertRows([ROW(1)])],
-      ["insertColumns", () => table.insertColumns({ id: [1], price: [1], status: ["a"] })],
-      ["setCell", () => table.setCell(0, "id", 1)],
-      ["deleteRows", () => table.deleteRows([0])],
-      ["view", () => table.view(0, 1)],
-      ["revision", () => table.revision],
-      ["rowCount", () => table.rowCount],
-      ["totalRows", () => table.totalRows],
+      ["insertRows", () => grid.insertRows([ROW(1)])],
+      ["insertColumns", () => grid.insertColumns({ id: [1], price: [1], status: ["a"] })],
+      ["setCell", () => grid.setCell(0, "id", 1)],
+      ["deleteRows", () => grid.deleteRows([0])],
+      ["view", () => grid.view(0, 1)],
+      ["revision", () => grid.revision],
+      ["rowCount", () => grid.rowCount],
+      ["totalRows", () => grid.totalRows],
     ];
 
     for (const [name, call] of calls) {
@@ -330,9 +330,9 @@ describe("disposal", () => {
   });
 
   it("can be disposed twice", async () => {
-    const { table } = await store();
-    table.dispose();
-    expect(() => table.dispose()).not.toThrow();
+    const { grid } = await store();
+    grid.dispose();
+    expect(() => grid.dispose()).not.toThrow();
   });
 
   it("drops every grid when the engine goes", async () => {
@@ -362,7 +362,7 @@ describe("disposal", () => {
 
 describe("at scale", () => {
   it("loads 200k rows through insertColumns and reads windows", async () => {
-    const { table } = await store();
+    const { grid } = await store();
     const n = 200_000;
     const labels = ["new", "paid", "picked", "shipped", "held", "cancelled"];
 
@@ -375,12 +375,12 @@ describe("at scale", () => {
       status[i] = labels[i % labels.length]!;
     }
 
-    const ids = table.insertColumns({ id, price, status });
+    const ids = grid.insertColumns({ id, price, status });
     expect(ids.length).toBe(n);
-    expect(table.rowCount).toBe(n);
+    expect(grid.rowCount).toBe(n);
 
     for (const start of [0, n / 2, n - 50]) {
-      const view = table.view(start, 50);
+      const view = grid.view(start, 50);
       expect(view.length, `start ${start}`).toBe(50);
       expect(view.get(0, "id")).toBe(start);
       expect(view.get(0, "status")).toBe(labels[start % labels.length]);

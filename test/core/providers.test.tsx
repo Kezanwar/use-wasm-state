@@ -390,6 +390,29 @@ describe("both providers, nested", () => {
   });
 });
 
+describe("urls", () => {
+  it("warns once about a key that names no loaded pattern", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const typo = { datagird: { wasmUrl: ENGINE_URL } };
+    render(
+      <>
+        <WasmStateSyncProvider urls={typo} />
+        <WasmStateAsyncProvider urls={typo} />
+      </>
+    );
+    // Once for the page, not once per provider that repeats it.
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0]![0]).toContain('"datagird"');
+    expect(warn.mock.calls[0]![0]).toContain('"datagrid"');
+  });
+
+  it("stays quiet for a pattern that is loaded", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    render(<WasmStateSyncProvider urls={URLS} />);
+    expect(warn).not.toHaveBeenCalled();
+  });
+});
+
 describe("mode", () => {
   it("is the provider's: a sync hook does not use an async provider", () => {
     let error: Error | null = null;

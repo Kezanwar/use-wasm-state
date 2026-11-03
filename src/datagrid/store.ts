@@ -410,7 +410,7 @@ export function createDataGridStore<S extends SchemaSpec>(
       disposed = true;
       listeners.clear();
       cache = null;
-      client.dropTableSync(handle);
+      client.dropGridSync(handle);
     },
   };
 

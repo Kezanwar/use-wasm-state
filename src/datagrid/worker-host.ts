@@ -16,12 +16,12 @@ import { instantiateModule } from "../core/wasm/loader";
 import { createHost, type Answer, type Host } from "../core/worker/host";
 import type { HostPort } from "../core/worker/protocol";
 import { SyncClient } from "./sync-client";
-import type { Request, TableUpdate, WindowData, WindowSpec } from "./protocol";
+import type { Request, GridUpdate, WindowData, WindowSpec } from "./protocol";
 
 export function createGridHost(port: HostPort): Host<Request> {
   let client: SyncClient | null = null;
   const schemas = new Map<number, readonly ColumnSpec[]>();
-  // How many dictionary entries the main thread has been sent, per table
+  // How many dictionary entries the main thread has been sent, per grid
   // and column. Deltas are computed from this, so nothing is sent twice.
   const sent = new Map<string, number>();
 
@@ -40,7 +40,7 @@ export function createGridHost(port: HostPort): Host<Request> {
    * Dictionary deltas first, because the windows it is about to send may
    * contain ids the main thread cannot resolve yet.
    */
-  const update = (handle: number, windows: readonly WindowSpec[]): TableUpdate => {
+  const update = (handle: number, windows: readonly WindowSpec[]): GridUpdate => {
     const c = engine("read");
     const schema = schemas.get(handle) ?? [];
 
@@ -92,14 +92,14 @@ export function createGridHost(port: HostPort): Host<Request> {
         return {};
       }
 
-      case "createTable": {
-        const handle = engine("createTable").createTableSync(request.schema);
+      case "createGrid": {
+        const handle = engine("createGrid").createGridSync(request.schema);
         schemas.set(handle, request.schema);
         return { result: handle };
       }
 
-      case "dropTable": {
-        engine("dropTable").dropTableSync(request.handle);
+      case "dropGrid": {
+        engine("dropGrid").dropGridSync(request.handle);
         schemas.delete(request.handle);
         return {};
       }

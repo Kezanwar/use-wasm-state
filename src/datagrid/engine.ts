@@ -9,6 +9,7 @@
  */
 
 import type { EngineUrls, Pattern } from "../core/contract";
+import { registerPattern } from "../core/patterns";
 import { disposedError } from "../core/errors";
 import { instantiateModule } from "../core/wasm/loader";
 import type { EngineExports } from "./abi";
@@ -54,7 +55,7 @@ export async function loadSyncEngine({ wasmUrl }: EngineUrls = {}): Promise<Sync
   return {
     createGrid(schema) {
       if (disposed) throw disposedError("createGrid", "engine");
-      const store = createDataGridStore(client, client.createTableSync(schema.columns), schema);
+      const store = createDataGridStore(client, client.createGridSync(schema.columns), schema);
       grids.add(store);
       return store;
     },
@@ -83,7 +84,7 @@ export async function loadAsyncEngine({
   return {
     createGrid(schema) {
       if (disposed) throw disposedError("createGrid", "engine");
-      const store = createAsyncDataGridStore(client, client.createTable(schema.columns), schema);
+      const store = createAsyncDataGridStore(client, client.createGrid(schema.columns), schema);
       grids.add(store);
       return store;
     },
@@ -104,3 +105,6 @@ export const datagrid: Pattern<SyncGridEngine, AsyncGridEngine> = {
   loadSync: loadSyncEngine,
   loadAsync: loadAsyncEngine,
 };
+
+// So a provider can tell `urls={{ datagrid: … }}` from a typo of it.
+registerPattern(datagrid.name);

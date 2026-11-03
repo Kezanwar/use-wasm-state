@@ -83,7 +83,7 @@ if (manifestPath) {
     problems.push(
       `unexpected exports: ${extra.join(", ")}\n` +
         `  Public surface the JS bindings do not know about. Add it to\n` +
-        `  ${manifestPath} and src/engine/abi.ts, or stop exporting it. A TinyGo\n` +
+        `  ${manifestPath} and src/datagrid/abi.ts, or stop exporting it. A TinyGo\n` +
         `  upgrade that adds a libm shim lands here too; list it as tolerated.`
     );
   }

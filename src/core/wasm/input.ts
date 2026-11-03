@@ -13,7 +13,7 @@
 /** What withInput needs of a module: the buffer, and memory to write into. */
 export interface InputHost {
   memory: WebAssembly.Memory;
-  /** See inputBuffer in engine/main.go. Returns 0 for a non-positive size. */
+  /** See inputBuffer in engine/cmd/datagrid/main.go. Returns 0 for a non-positive size. */
   inputBuffer(minBytes: number): number;
 }
 

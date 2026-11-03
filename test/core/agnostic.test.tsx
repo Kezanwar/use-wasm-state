@@ -4,6 +4,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { WasmStateAsyncProvider, WasmStateError, WasmStateSyncProvider } from "../../src/index";
 import type { Mode, Pattern, StateDef } from "../../src/core/contract";
+import { registerPattern } from "../../src/core/patterns";
 import { useSharedState } from "../../src/core/state";
 import {
   defineDataGrid,
@@ -51,6 +52,9 @@ const counting: Pattern = {
     return engine;
   },
 };
+
+// What a pattern's entry does on import, so a provider knows its name.
+registerPattern(counting.name);
 
 function defineCounter(key: string, start: number): StateDef<Counter, Counter> {
   const create = () => {

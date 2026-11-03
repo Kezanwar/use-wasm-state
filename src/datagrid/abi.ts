@@ -25,9 +25,9 @@ import type { InputHost } from "../core/wasm/input";
  */
 export const Status = {
   OK: 0,
-  /** The handle was never issued, or the table has been dropped. */
+  /** The handle was never issued, or the grid has been dropped. */
   BadHandle: -1,
-  /** A row id or column index outside the table. */
+  /** A row id or column index outside the grid. */
   OutOfRange: -2,
   /** The row exists but has been deleted. */
   RowDeleted: -3,
@@ -44,7 +44,7 @@ export const Status = {
 export type StatusCode = (typeof Status)[keyof typeof Status];
 
 const STATUS_TEXT: Record<number, string> = {
-  [Status.BadHandle]: "no such table (bad or dropped handle)",
+  [Status.BadHandle]: "no such grid (bad or dropped handle)",
   [Status.OutOfRange]: "row or column out of range",
   [Status.RowDeleted]: "row is deleted",
   [Status.WrongType]: "wrong column type",
@@ -80,7 +80,7 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
 /**
- * Encode a schema for createTable.
+ * Encode a schema for createGrid.
  *
  * Layout, packed and little-endian: u32 columnCount, then per column a u8
  * type, a u32 name byte length and the name's UTF-8 bytes.
@@ -303,7 +303,7 @@ export function decodeDict(bytes: Uint8Array): string[] {
 /* Queries                                                             */
 /* ------------------------------------------------------------------ */
 
-/** Mirrors Op in engine/table/query.go. The numbers are the wire format. */
+/** Mirrors Op in engine/datagrid/query.go. The numbers are the wire format. */
 export const FilterOp = {
   eq: 0,
   ne: 1,
@@ -407,7 +407,7 @@ export function encodeQuery(query: WireQuery): Uint8Array {
 /* ------------------------------------------------------------------ */
 
 /**
- * Every export of datagrid.wasm, matching engine/main.go one for one.
+ * Every export of datagrid.wasm, matching engine/cmd/datagrid/main.go one for one.
  *
  * Integer results that can fail carry a negative {@link Status} instead of
  * throwing: a trap would take the whole module down, and a grid asking for
@@ -435,15 +435,15 @@ export interface EngineExports extends WasmAllocator, InputHost {
   free(ptr: number): void;
 
   /** Returns a handle, or a negative status. */
-  createTable(schemaPtr: number, schemaLen: number): number;
-  dropTable(handle: number): number;
+  createGrid(schemaPtr: number, schemaLen: number): number;
+  dropGrid(handle: number): number;
 
   /**
    * Append rows. `descPtr` points at `colCount` descriptors, one per column
    * in schema order, each four u32s: dataPtr, dataLen, offsetsPtr, rowCount.
    *
    * Returns the first row id appended, or a negative status. Atomic: a
-   * rejected insert leaves the table untouched.
+   * rejected insert leaves the grid untouched.
    */
   insertColumns(handle: number, descPtr: number, colCount: number): number;
 
@@ -484,8 +484,8 @@ export const ENGINE_EXPORTS = [
   "inputBuffer",
   "alloc",
   "free",
-  "createTable",
-  "dropTable",
+  "createGrid",
+  "dropGrid",
   "insertColumns",
   "setCellI32",
   "setCellF64",

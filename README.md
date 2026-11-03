@@ -210,8 +210,10 @@ an assistant for code.
 ## Layout
 
 ```
-engine/    Go source for the bundled wasm. `table` is pure Go and tests with
-           plain `go test`; main.go is the thin ABI layer on top.
+engine/    Go source for the bundled wasm. `datagrid` is pure Go and tests with
+           plain `go test`, `datagrid/wire` is its wire format, `abi` is what
+           every pattern shares at the boundary, and `cmd/datagrid` is the
+           thin export layer that becomes datagrid.wasm.
 src/       the npm package. `core` is the root entry, what every kind of
            state shares: providers, errors, wasm loading and the worker
            plumbing. `datagrid` is the first kind, with its engine.
@@ -275,8 +277,8 @@ Nothing else does.
 
 1. ~~Scaffold workspace, tooling, CI~~
 2. ~~`internal/wasm` loader and memory helpers, with tests~~
-3. ~~Go `table` package: schema, insert, view~~
-4. ~~ABI in `main.go`, build, `abi.test.ts`~~
+3. ~~Go `datagrid` package: schema, insert, view~~
+4. ~~ABI in `cmd/datagrid`, build, `abi.test.ts`~~
 5. ~~`SyncClient`, the store and the creation and read hooks~~
 6. ~~Demo grid with 200k rows~~
 7. ~~Sort, filter, search in Go~~

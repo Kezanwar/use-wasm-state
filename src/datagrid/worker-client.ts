@@ -13,7 +13,7 @@ import type { ColumnSpec, WireQuery } from "./abi";
 import type { CellValue, ColumnKind, ColumnValues, EngineMutations } from "./client";
 import { WorkerTransport } from "../core/worker/transport";
 import type { Ok } from "../core/worker/protocol";
-import type { Request, TableUpdate, WindowSpec } from "./protocol";
+import type { Request, GridUpdate, WindowSpec } from "./protocol";
 
 /**
  * The worker bundle, next to this one.
@@ -27,7 +27,7 @@ function defaultWorkerUrl(): string {
 }
 
 /** Called with whatever a reply said had changed. */
-export type UpdateListener = (handle: number, update: TableUpdate) => void;
+export type UpdateListener = (handle: number, update: GridUpdate) => void;
 
 export interface WorkerClientOptions {
   wasmUrl: string;
@@ -39,9 +39,9 @@ export interface WorkerClientOptions {
 export class WorkerClient implements EngineMutations {
   readonly mode = "worker" as const;
 
-  #transport: WorkerTransport<Request, TableUpdate>;
+  #transport: WorkerTransport<Request, GridUpdate>;
   #listeners = new Set<UpdateListener>();
-  /** Which windows each table wants kept fresh, set by its store. */
+  /** Which windows each grid wants kept fresh, set by its store. */
   #windows = new Map<number, readonly WindowSpec[]>();
   #opened: Promise<void>;
 
@@ -68,7 +68,7 @@ export class WorkerClient implements EngineMutations {
     return () => void this.#listeners.delete(listener);
   }
 
-  /** The windows a table wants refreshed with every reply. */
+  /** The windows a grid wants refreshed with every reply. */
   setWindows(handle: number, windows: readonly WindowSpec[]): void {
     this.#windows.set(handle, windows);
   }
@@ -78,7 +78,7 @@ export class WorkerClient implements EngineMutations {
   }
 
   /** Hand an update to whoever is listening, with the handle it describes. */
-  #publish(handle: number, reply: Ok<TableUpdate>) {
+  #publish(handle: number, reply: Ok<GridUpdate>) {
     if (!reply.update) return;
     for (const listener of this.#listeners) listener(handle, reply.update);
   }
@@ -93,14 +93,14 @@ export class WorkerClient implements EngineMutations {
   /* EngineMutations                                                   */
   /* ---------------------------------------------------------------- */
 
-  async createTable(schema: readonly ColumnSpec[]): Promise<number> {
+  async createGrid(schema: readonly ColumnSpec[]): Promise<number> {
     await this.#opened;
-    const reply = await this.#transport.send({ op: "createTable", schema });
+    const reply = await this.#transport.send({ op: "createGrid", schema });
     return reply.result as number;
   }
 
-  async dropTable(handle: number): Promise<void> {
-    await this.#transport.send({ op: "dropTable", handle });
+  async dropGrid(handle: number): Promise<void> {
+    await this.#transport.send({ op: "dropGrid", handle });
     this.#windows.delete(handle);
   }
 

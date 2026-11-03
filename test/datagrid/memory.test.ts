@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import { ColumnType, Status, type ColumnSpec, type EngineExports } from "../../src/datagrid/abi";
 import {
-  createTable,
+  createGrid,
   deleteRows,
   dictPacked,
   insertColumns,
@@ -44,7 +44,7 @@ const MB = (bytes: number) => `${(bytes / 1048576).toFixed(2)}MB`;
 
 async function loaded(): Promise<{ e: EngineExports; h: number }> {
   const e = await newEngine();
-  const h = createTable(e, SCHEMA);
+  const h = createGrid(e, SCHEMA);
 
   const ids = new Int32Array(ROWS);
   const prices = new Float64Array(ROWS);
@@ -97,7 +97,7 @@ describe("steady state", () => {
           break;
         case 3: {
           // Bounded by the rows still live, since the batch deletes below
-          // keep shrinking the table under this loop.
+          // keep shrinking the grid under this loop.
           const start = (i * 37) % (liveRows - 50);
           const v = readView(e, h, start, 50, SCHEMA)!;
           expect(v.ids.length).toBe(50);

@@ -6,7 +6,7 @@
  * freeing a block per operation is the opposite of what this engine wants:
  * arguments go through its own grow-only input buffer and results are read
  * out of its own output buffers, so steady state allocates nothing. See
- * withInput in src/engine/input.ts.
+ * withInput in src/core/wasm/input.ts.
  */
 
 /**

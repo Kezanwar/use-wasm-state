@@ -41,8 +41,10 @@ func LiveBlocks() int { return len(live) }
 
 func align8(n uintptr) uintptr { return (n + 7) &^ 7 }
 
-// alignUp is align8 for sizes and offsets rather than addresses.
-func alignUp(n int) int { return (n + 7) &^ 7 }
+// AlignUp is align8 for sizes and offsets rather than addresses: what a
+// pattern lays its own buffers out with, so every section starts on an
+// 8-byte boundary.
+func AlignUp(n int) int { return (n + 7) &^ 7 }
 
 // Pack squeezes an (offset, length) pair into one int64, which arrives in
 // JavaScript as a bigint. It is how an export returns a buffer when wasm

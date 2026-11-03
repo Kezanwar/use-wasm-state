@@ -3,7 +3,7 @@
  *
  * Deliberately generic: a compiled-module cache, a compileStreaming
  * fallback for hosts that send the wrong MIME type, and the reactor
- * `_initialize` call. Nothing here knows about tables, this engine's ABI or
+ * `_initialize` call. Nothing here knows about grids, this engine's ABI or
  * React, which is why the same three functions serve the main thread, the
  * worker and the Node test suite.
  */

@@ -54,9 +54,9 @@ for (const [type, name] of parts) {
   at += 5 + name.length;
 }
 const sp = write(schema);
-const handle = e.createTable(sp, schema.byteLength);
+const handle = e.createGrid(sp, schema.byteLength);
 e.free(sp);
-if (handle < 0) throw new Error(`createTable failed: ${handle}`);
+if (handle < 0) throw new Error(`createGrid failed: ${handle}`);
 
 const ids = new Int32Array(ROWS);
 const prices = new Float64Array(ROWS);
@@ -184,34 +184,34 @@ for (let i = 0; i < ROWS; i++) {
   rowObjects[i] = { id: i * 10, price: i + 0.5, status: statusValues[i] };
 }
 
-async function freshTable() {
+async function freshGrid() {
   const engine = await loadSyncEngine({ wasmUrl: WASM_URL });
-  return { engine, table: engine.createGrid(storeSchema) };
+  return { engine, grid: engine.createGrid(storeSchema) };
 }
 
 async function timeStore() {
-  const columnar = await freshTable();
+  const columnar = await freshGrid();
   const t1 = performance.now();
-  columnar.table.insertColumns({ id: ids, price: prices, status: statusValues });
+  columnar.grid.insertColumns({ id: ids, price: prices, status: statusValues });
   const insertColumnsMs = performance.now() - t1;
 
-  const rowwise = await freshTable();
+  const rowwise = await freshGrid();
   const t2 = performance.now();
-  rowwise.table.insertRows(rowObjects);
+  rowwise.grid.insertRows(rowObjects);
   const insertRowsMs = performance.now() - t2;
 
-  const { table } = columnar;
+  const { grid } = columnar;
 
   // Warm the view path, then measure a scroll step as a grid pays for it:
   // the wasm call, the decode, the dictionary resolution and the row
   // objects React renders.
-  for (let i = 0; i < 2000; i++) table.view(i % 1000, 50).rows();
+  for (let i = 0; i < 2000; i++) grid.view(i % 1000, 50).rows();
 
   const VIEWS = 50_000;
   const t3 = performance.now();
   let sink = 0;
   for (let i = 0; i < VIEWS; i++) {
-    const rows = table.view(i % (ROWS - 50), 50).rows();
+    const rows = grid.view(i % (ROWS - 50), 50).rows();
     sink += rows[0].id;
   }
   const viewUs = ((performance.now() - t3) / VIEWS) * 1000;
@@ -219,16 +219,16 @@ async function timeStore() {
   // A cache hit: the same window at the same revision, which is what
   // useSyncExternalStore asks for on every unrelated re-render.
   const t4 = performance.now();
-  for (let i = 0; i < VIEWS; i++) sink += table.view(100, 50).length;
+  for (let i = 0; i < VIEWS; i++) sink += grid.view(100, 50).length;
   const cachedUs = ((performance.now() - t4) / VIEWS) * 1000;
 
   const EDITS = 20_000;
   const t5 = performance.now();
-  for (let i = 0; i < EDITS; i++) table.setCell(i, "price", i + 0.25);
+  for (let i = 0; i < EDITS; i++) grid.setCell(i, "price", i + 0.25);
   const setCellUs = ((performance.now() - t5) / EDITS) * 1000;
 
   const t6 = performance.now();
-  for (let i = 0; i < EDITS; i++) table.setCell(i, "status", LABELS[i % LABELS.length]);
+  for (let i = 0; i < EDITS; i++) grid.setCell(i, "status", LABELS[i % LABELS.length]);
   const setStringUs = ((performance.now() - t6) / EDITS) * 1000;
 
   if (sink < 0) throw new Error("unreachable");
@@ -243,44 +243,44 @@ async function timeStore() {
   };
 
   const queries = [
-    timeQuery("sort f64", (i) => table.sortBy("price", i % 2 ? "asc" : "desc")),
-    timeQuery("sort i32", (i) => table.sortBy("id", i % 2 ? "asc" : "desc")),
-    timeQuery("sort string", (i) => table.sortBy("status", i % 2 ? "asc" : "desc")),
+    timeQuery("sort f64", (i) => grid.sortBy("price", i % 2 ? "asc" : "desc")),
+    timeQuery("sort i32", (i) => grid.sortBy("id", i % 2 ? "asc" : "desc")),
+    timeQuery("sort string", (i) => grid.sortBy("status", i % 2 ? "asc" : "desc")),
     timeQuery("sort multi", (i) =>
-      table.setQuery({
+      grid.setQuery({
         sort: [{ column: "status" }, { column: "price", direction: i % 2 ? "asc" : "desc" }],
       })
     ),
     timeQuery("filter numeric", (i) =>
-      table.setQuery({ filters: [{ column: "price", op: "gt", value: (i % 10) * 100 }] })
+      grid.setQuery({ filters: [{ column: "price", op: "gt", value: (i % 10) * 100 }] })
     ),
     timeQuery("filter string eq", (i) =>
-      table.setQuery({
+      grid.setQuery({
         filters: [{ column: "status", op: "eq", value: LABELS[i % LABELS.length] }],
       })
     ),
     timeQuery("filter string in", (i) =>
-      table.setQuery({
+      grid.setQuery({
         filters: [{ column: "status", op: "in", value: LABELS.slice(0, (i % 3) + 1) }],
       })
     ),
-    timeQuery("search", (i) => table.search(["ship", "pai", "hel", "new"][i % 4])),
+    timeQuery("search", (i) => grid.search(["ship", "pai", "hel", "new"][i % 4])),
     timeQuery("filter + search + sort", (i) =>
-      table.setQuery({
+      grid.setQuery({
         filters: [{ column: "price", op: "gt", value: 100 }],
         search: ["e", "a", "i"][i % 3],
         sort: [{ column: "price", direction: i % 2 ? "asc" : "desc" }],
       })
     ),
   ];
-  table.clearQuery();
+  grid.clearQuery();
 
   const sortedCell = (() => {
-    table.sortBy("price", "asc");
+    grid.sortBy("price", "asc");
     const started = performance.now();
-    for (let i = 0; i < 200; i++) table.setCell(i, "price", i + 0.5);
+    for (let i = 0; i < 200; i++) grid.setCell(i, "price", i + 0.5);
     const ms = (performance.now() - started) / 200;
-    table.clearQuery();
+    grid.clearQuery();
     return ms;
   })();
 

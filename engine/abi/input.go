@@ -6,7 +6,7 @@ package abi
 // one and then calls an export that reads it, and those exports may write a
 // view on the way out. One shared buffer would have the reply overwrite the
 // request.
-var inputState scratch
+var inputState Scratch
 
 // InputBuffer returns a buffer of at least minBytes for JS to write
 // arguments into, growing it if needed and never shrinking it.
@@ -21,12 +21,12 @@ var inputState scratch
 // caller works out everything one operation needs, asks once, and only then
 // starts writing: an offset taken before a grow points into the old block.
 func InputBuffer(minBytes int32) []byte {
-	return inputState.ensure(int(minBytes))
+	return inputState.Ensure(int(minBytes))
 }
 
 // InputCapacity is the bytes the input buffer has reserved. Tests watch it
 // to tell a reuse from a regrow.
-func InputCapacity() int { return inputState.capacity() }
+func InputCapacity() int { return inputState.Capacity() }
 
 // ResetInputBuffer drops the buffer. For tests; the module never does this.
-func ResetInputBuffer() { inputState.buf = nil }
+func ResetInputBuffer() { inputState.Reset() }

@@ -50,7 +50,7 @@ test("shift-click adds a second sort column", async ({ page }) => {
   expect([...within].sort((a, b) => a - b)).toEqual(within);
 });
 
-test("search narrows the table and every visible row matches", async ({ page }) => {
+test("search narrows the grid and every visible row matches", async ({ page }) => {
   await ready(page);
 
   await page.getByTestId("search").fill("ship");
@@ -135,7 +135,7 @@ test("typing in the search box drops no frames", async ({ page }) => {
       return performance.now() - before;
     };
 
-    // The first search of a table lowercases every dictionary entry in
+    // The first search of a grid lowercases every dictionary entry in
     // every string column. That is one-off work, not per-keystroke, so it
     // is measured on its own rather than blamed on typing.
     const cold = await type("s");

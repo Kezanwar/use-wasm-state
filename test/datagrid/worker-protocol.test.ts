@@ -5,7 +5,7 @@ import type {
   GridReply as Reply,
   Request,
   RequestBody,
-  TableUpdate,
+  GridUpdate,
 } from "../../src/datagrid/protocol";
 import { ColumnType, type ColumnSpec } from "../../src/datagrid/abi";
 import { ENGINE_URL, serveEngine } from "../helpers/engine";
@@ -62,7 +62,7 @@ const ok = (reply: Reply) => {
 async function opened() {
   const d = driver();
   ok(await d.send({ op: "open", url: ENGINE_URL, cache: true }));
-  const created = ok(await d.send({ op: "createTable", schema: SCHEMA }));
+  const created = ok(await d.send({ op: "createGrid", schema: SCHEMA }));
   return { ...d, handle: created.result as number };
 }
 
@@ -84,7 +84,7 @@ async function seeded() {
 }
 
 describe("every operation", () => {
-  it("opens, creates a table and inserts", async () => {
+  it("opens, creates a grid and inserts", async () => {
     const d = await seeded();
     const reply = ok(await d.send({ op: "read", handle: d.handle, windows: [] }));
     expect(reply.update!.rowCount).toBe(5);
@@ -138,9 +138,9 @@ describe("every operation", () => {
     expect([...reply.update!.windows[0]!.view.ids]).toEqual([4, 0, 2, 1, 3]);
   });
 
-  it("drops a table", async () => {
+  it("drops a grid", async () => {
     const d = await seeded();
-    ok(await d.send({ op: "dropTable", handle: d.handle }));
+    ok(await d.send({ op: "dropGrid", handle: d.handle }));
     const reply = await d.send({ op: "read", handle: d.handle, windows: [] });
     expect(reply.ok).toBe(false);
   });
@@ -165,7 +165,7 @@ describe("the reply to a mutation", () => {
       })
     );
 
-    const update = reply.update as TableUpdate;
+    const update = reply.update as GridUpdate;
     expect(update.revision).toBe(2);
     expect(update.rowCount).toBe(5);
     expect(update.totalRows).toBe(5);
@@ -285,7 +285,7 @@ describe("errors", () => {
 
   it("report a call made before the engine opened", async () => {
     const d = driver();
-    const reply = await d.send({ op: "createTable", schema: SCHEMA });
+    const reply = await d.send({ op: "createGrid", schema: SCHEMA });
     expect(reply.ok).toBe(false);
     if (!reply.ok) expect(reply.error.code).toBe("disposed");
   });

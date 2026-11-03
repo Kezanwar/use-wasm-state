@@ -57,9 +57,9 @@ export const ENGINE_BYTE_SIZE = readFileSync(ENGINE_PATH).byteLength;
 /* Calls                                                               */
 /* ------------------------------------------------------------------ */
 
-export function createTable(e: EngineExports, schema: readonly ColumnSpec[]): number {
+export function createGrid(e: EngineExports, schema: readonly ColumnSpec[]): number {
   const bytes = encodeSchema(schema);
-  return withInput(e, [bytesIn(bytes)], ([s]) => e.createTable(s.ptr, s.len));
+  return withInput(e, [bytesIn(bytes)], ([s]) => e.createGrid(s.ptr, s.len));
 }
 
 export type ColumnInput =

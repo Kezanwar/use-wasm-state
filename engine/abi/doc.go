@@ -1,19 +1,20 @@
-// Package abi is the wire format between JavaScript and the table engine.
+// Package abi is what every pattern's wasm module shares at the boundary
+// with JavaScript: the engine-owned scratch buffers, the input buffer,
+// Alloc and Pack, the status codes, and the pointer plumbing an export
+// needs to turn an (offset, length) pair into a []byte.
 //
-// Everything here works on plain []byte and Go values, so it is testable
-// with `go test` and carries no wasm-specific code beyond the allocator. The
-// pointer arithmetic lives one level up in main.go, which turns an (offset,
-// length) pair from linear memory into a []byte and hands it to a function
-// in here.
+// Nothing here knows what a grid is. Each pattern keeps its own wire format
+// beside its engine (the datagrid's is engine/datagrid/wire) and its own
+// command under engine/cmd, built on these.
 //
-// Three rules the whole format follows:
+// Three rules every pattern's format follows:
 //
 //   - Little-endian, always. Wasm linear memory is little-endian and so is
 //     every platform JS runs on, so there is nothing to negotiate.
 //   - Lengths travel with pointers. Nothing is NUL-terminated and nothing is
 //     inferred from the data.
-//   - Who allocates says who frees. JS allocates and frees the buffers it
-//     fills for insertColumns; the engine allocates what it returns from
-//     dictSince and JS frees that; the view buffer belongs to the engine for
-//     its whole life and JS must never free it.
+//   - The engine owns every transfer buffer. JS writes arguments into the
+//     input buffer and copies results out of the output buffers, and never
+//     frees either; Alloc and Free remain only for a block that genuinely
+//     needs a lifetime of its own.
 package abi

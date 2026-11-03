@@ -10,7 +10,7 @@ import {
   type EngineExports,
 } from "../../src/datagrid/abi";
 import {
-  createTable,
+  createGrid,
   deleteRows,
   dictPacked,
   insertColumns,
@@ -44,7 +44,7 @@ afterAll(() => vi.unstubAllGlobals());
 
 async function seeded(rows: number): Promise<{ e: EngineExports; h: number }> {
   const e = await newEngine();
-  const h = createTable(e, SCHEMA);
+  const h = createGrid(e, SCHEMA);
 
   const ids = new Int32Array(rows);
   const prices = new Float64Array(rows);
@@ -110,16 +110,16 @@ describe("alloc / free", () => {
 /* Schema                                                              */
 /* ------------------------------------------------------------------ */
 
-describe("createTable / dropTable", () => {
+describe("createGrid / dropGrid", () => {
   it("accepts a schema encoded by the TS side", async () => {
     const e = await newEngine();
-    expect(createTable(e, SCHEMA)).toBe(0);
-    expect(createTable(e, SCHEMA)).toBe(1);
+    expect(createGrid(e, SCHEMA)).toBe(0);
+    expect(createGrid(e, SCHEMA)).toBe(1);
   });
 
   it("accepts multi-byte column names", async () => {
     const e = await newEngine();
-    const h = createTable(e, [
+    const h = createGrid(e, [
       { name: "prix en €", type: ColumnType.F64 },
       { name: "名前", type: ColumnType.String },
     ]);
@@ -151,23 +151,23 @@ describe("createTable / dropTable", () => {
     ];
 
     for (const [name, bytes] of cases) {
-      const status = withInput(e, [bytesIn(bytes)], ([b]) => e.createTable(b.ptr, b.len));
+      const status = withInput(e, [bytesIn(bytes)], ([b]) => e.createGrid(b.ptr, b.len));
       expect(status, name).toBe(Status.BadSchema);
     }
   });
 
   it("rejects a null or zero-length schema pointer", async () => {
     const e = await newEngine();
-    expect(e.createTable(0, 0)).toBe(Status.BadSchema);
+    expect(e.createGrid(0, 0)).toBe(Status.BadSchema);
   });
 
-  it("drops a table and never reuses its handle", async () => {
+  it("drops a grid and never reuses its handle", async () => {
     const e = await newEngine();
-    const dropped = createTable(e, SCHEMA);
+    const dropped = createGrid(e, SCHEMA);
 
-    expect(e.dropTable(dropped)).toBe(Status.OK);
-    expect(e.dropTable(dropped)).toBe(Status.BadHandle);
-    expect(createTable(e, SCHEMA)).not.toBe(dropped);
+    expect(e.dropGrid(dropped)).toBe(Status.OK);
+    expect(e.dropGrid(dropped)).toBe(Status.BadHandle);
+    expect(createGrid(e, SCHEMA)).not.toBe(dropped);
   });
 });
 
@@ -178,7 +178,7 @@ describe("createTable / dropTable", () => {
 describe("insertColumns", () => {
   it("appends rows and returns the first row id", async () => {
     const e = await newEngine();
-    const h = createTable(e, SCHEMA);
+    const h = createGrid(e, SCHEMA);
 
     expect(
       insertColumns(e, h, [
@@ -202,7 +202,7 @@ describe("insertColumns", () => {
 
   it("accepts an insert of no rows", async () => {
     const e = await newEngine();
-    const h = createTable(e, SCHEMA);
+    const h = createGrid(e, SCHEMA);
     expect(
       insertColumns(e, h, [
         { type: ColumnType.I32, values: [] },
@@ -215,7 +215,7 @@ describe("insertColumns", () => {
 
   it("round-trips multi-byte strings", async () => {
     const e = await newEngine();
-    const h = createTable(e, SCHEMA);
+    const h = createGrid(e, SCHEMA);
     const values = ["café", "日本語", "", "straße"];
 
     insertColumns(e, h, [
@@ -229,7 +229,7 @@ describe("insertColumns", () => {
 
   it("rejects ragged columns with RowCount", async () => {
     const e = await newEngine();
-    const h = createTable(e, SCHEMA);
+    const h = createGrid(e, SCHEMA);
 
     expect(
       insertColumns(e, h, [
@@ -243,7 +243,7 @@ describe("insertColumns", () => {
 
   it("rejects the wrong number of descriptors with BadArgument", async () => {
     const e = await newEngine();
-    const h = createTable(e, SCHEMA);
+    const h = createGrid(e, SCHEMA);
 
     expect(
       insertColumns(e, h, [
@@ -255,7 +255,7 @@ describe("insertColumns", () => {
 
   it("rejects a misaligned data pointer with BadArgument", async () => {
     const e = await newEngine();
-    const h = createTable(e, SCHEMA);
+    const h = createGrid(e, SCHEMA);
 
     // Descriptors pointing one byte off an aligned offset. Reinterpreting
     // that as float64s would be undefined behaviour, so it has to be
@@ -276,7 +276,7 @@ describe("insertColumns", () => {
 
   it("rejects string offsets that run past the blob", async () => {
     const e = await newEngine();
-    const h = createTable(e, [{ name: "s", type: ColumnType.String }]);
+    const h = createGrid(e, [{ name: "s", type: ColumnType.String }]);
 
     const status = withInput(
       e,
@@ -377,7 +377,7 @@ describe("setCell and deleteRows", () => {
 describe("revision", () => {
   it("moves only on a successful, non-empty mutation", async () => {
     const e = await newEngine();
-    const h = createTable(e, SCHEMA);
+    const h = createGrid(e, SCHEMA);
 
     const rev = () => e.revision(h) >>> 0;
     expect(rev()).toBe(0);
@@ -501,7 +501,7 @@ describe("view", () => {
 describe("dictionary mirror", () => {
   it("sends only what was added since the last known length", async () => {
     const e = await newEngine();
-    const h = createTable(e, SCHEMA);
+    const h = createGrid(e, SCHEMA);
 
     insertColumns(e, h, [
       { type: ColumnType.I32, values: [1, 2] },
@@ -636,10 +636,10 @@ describe("at 200k rows", () => {
 describe("a dropped handle", () => {
   it("reports BadHandle from every export that returns a status", async () => {
     const { e, h } = await seeded(4);
-    expect(e.dropTable(h)).toBe(Status.OK);
+    expect(e.dropGrid(h)).toBe(Status.OK);
 
     const calls: Array<[string, () => number]> = [
-      ["dropTable", () => e.dropTable(h)],
+      ["dropGrid", () => e.dropGrid(h)],
       ["insertColumns", () => e.insertColumns(h, 0, 3)],
       ["setCellI32", () => e.setCellI32(h, 0, 0, 1)],
       ["setCellF64", () => e.setCellF64(h, 0, 1, 1)],
@@ -731,7 +731,7 @@ describe("under churn", () => {
 
   it("stays correct across repeated large inserts", async () => {
     const e = await newEngine();
-    const h = createTable(e, SCHEMA);
+    const h = createGrid(e, SCHEMA);
 
     const ROWS = 20_000;
     const ids = Int32Array.from({ length: ROWS }, (_, i) => i);
@@ -877,7 +877,7 @@ describe("withInput", () => {
 
   it("is correct after the input buffer has had to grow", async () => {
     const e = await newEngine();
-    const h = createTable(e, SCHEMA);
+    const h = createGrid(e, SCHEMA);
 
     // Start small, then jump well past it. Growing moves the buffer, so a
     // helper that asked for it before sizing everything would hand out
@@ -916,7 +916,7 @@ describe("withInput", () => {
 
   it("handles an operation whose arguments are all empty", async () => {
     const e = await newEngine();
-    const h = createTable(e, SCHEMA);
+    const h = createGrid(e, SCHEMA);
 
     // No buffer is needed at all, and the engine reads a null pointer with
     // a zero length as "nothing".
@@ -965,7 +965,7 @@ describe("the view header", () => {
     expect(deleteRows(e, h, [0, 1, 2, 3, 4, 5, 6, 7])).toBe(Status.OK);
 
     // Two rows left, so a request for row 5 lands at the end. Without the
-    // start on the wire JS could not tell that from an empty table.
+    // start on the wire JS could not tell that from an empty grid.
     const v = readView(e, h, 5, 10, SCHEMA)!;
     expect(v.start).toBe(2);
     expect(v.ids.length).toBe(0);
@@ -977,9 +977,9 @@ describe("the view header", () => {
 /* ------------------------------------------------------------------ */
 
 describe("setQuery", () => {
-  async function queryTable() {
+  async function queryGrid() {
     const e = await newEngine();
-    const h = createTable(e, SCHEMA);
+    const h = createGrid(e, SCHEMA);
     insertColumns(e, h, [
       { type: ColumnType.I32, values: [100, 200, 300, 400, 500] },
       { type: ColumnType.F64, values: [30, 10, 20, 10, 40] },
@@ -991,7 +991,7 @@ describe("setQuery", () => {
   const order = (e: EngineExports, h: number) => [...readView(e, h, 0, e.rowCount(h), SCHEMA)!.ids];
 
   it("sorts, and the TS encoder agrees with the Go decoder", async () => {
-    const { e, h } = await queryTable();
+    const { e, h } = await queryGrid();
 
     expect(setQuery(e, h, { sort: [{ col: 1, desc: false }], filters: [], search: "" })).toBe(
       Status.OK
@@ -1005,7 +1005,7 @@ describe("setQuery", () => {
   });
 
   it("filters on each operator", async () => {
-    const { e, h } = await queryTable();
+    const { e, h } = await queryGrid();
     const only = (filter: Parameters<typeof setQuery>[2]["filters"][number]) => {
       expect(setQuery(e, h, { sort: [], filters: [filter], search: "" })).toBe(Status.OK);
       return order(e, h);
@@ -1021,21 +1021,21 @@ describe("setQuery", () => {
   });
 
   it("searches across the string columns", async () => {
-    const { e, h } = await queryTable();
+    const { e, h } = await queryGrid();
     expect(setQuery(e, h, { sort: [], filters: [], search: "ship" })).toBe(Status.OK);
     expect(order(e, h)).toEqual([3]);
     expect(e.rowCount(h)).toBe(1);
   });
 
   it("restores id order for an empty query", async () => {
-    const { e, h } = await queryTable();
+    const { e, h } = await queryGrid();
     setQuery(e, h, { sort: [{ col: 1, desc: true }], filters: [], search: "" });
     expect(setQuery(e, h, { sort: [], filters: [], search: "" })).toBe(Status.OK);
     expect(order(e, h)).toEqual([0, 1, 2, 3, 4]);
   });
 
   it("bumps the revision only when the order could differ", async () => {
-    const { e, h } = await queryTable();
+    const { e, h } = await queryGrid();
     const rev = () => e.revision(h) >>> 0;
 
     const query = { sort: [{ col: 1, desc: true }], filters: [], search: "" };
@@ -1050,7 +1050,7 @@ describe("setQuery", () => {
   });
 
   it("reports a bad query and keeps the previous one", async () => {
-    const { e, h } = await queryTable();
+    const { e, h } = await queryGrid();
     setQuery(e, h, { sort: [{ col: 1, desc: true }], filters: [], search: "" });
     const before = order(e, h);
 
@@ -1067,7 +1067,7 @@ describe("setQuery", () => {
   });
 
   it("rejects a malformed buffer", async () => {
-    const { e, h } = await queryTable();
+    const { e, h } = await queryGrid();
     expect(e.setQuery(h, 0, -1)).toBe(Status.BadArgument);
     expect(
       withInput(e, [bytesIn(new Uint8Array([1, 0, 0, 0]))], ([q]) => e.setQuery(h, q.ptr, q.len))

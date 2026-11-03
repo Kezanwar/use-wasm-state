@@ -28,7 +28,7 @@ export type ColumnValues =
 export type CellValue = number | string;
 
 /**
- * What any transport can do: change a table.
+ * What any transport can do: change a grid.
  *
  * Split from the reads because a worker transport has none of them. Its
  * store never asks "what is the row count" — every reply already carries
@@ -37,9 +37,9 @@ export type CellValue = number | string;
  * calls, which is a worse lie than a second name.
  */
 export interface EngineMutations {
-  /** Create a table and return its handle. */
-  createTable(schema: readonly ColumnSpec[]): Promise<number>;
-  dropTable(handle: number): Promise<void>;
+  /** Create a grid and return its handle. */
+  createGrid(schema: readonly ColumnSpec[]): Promise<number>;
+  dropGrid(handle: number): Promise<void>;
 
   /** Append rows, one entry per column in schema order. Returns the first row id. */
   insertColumns(handle: number, columns: readonly ColumnValues[]): Promise<number>;
@@ -109,8 +109,8 @@ export interface EngineClient extends EngineMutations, EngineReads {}
 export interface SyncEngineClient extends EngineClient {
   readonly mode: "sync";
 
-  createTableSync(schema: readonly ColumnSpec[]): number;
-  dropTableSync(handle: number): void;
+  createGridSync(schema: readonly ColumnSpec[]): number;
+  dropGridSync(handle: number): void;
   insertColumnsSync(handle: number, columns: readonly ColumnValues[]): number;
   setCellSync(handle: number, rowId: number, col: number, kind: ColumnKind, value: CellValue): void;
   deleteRowsSync(handle: number, rowIds: ArrayLike<number>): void;

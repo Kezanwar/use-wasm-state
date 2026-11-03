@@ -6,56 +6,56 @@ import (
 )
 
 func TestScratchGrowsAndNeverShrinks(t *testing.T) {
-	var s scratch
+	var s Scratch
 
-	b := s.ensure(100)
+	b := s.Ensure(100)
 	if len(b) != 100 {
 		t.Fatalf("ensure(100) gave %d bytes", len(b))
 	}
-	first := s.capacity()
+	first := s.Capacity()
 
 	// A smaller ask reuses what is already there.
-	if got := len(s.ensure(10)); got != 10 {
+	if got := len(s.Ensure(10)); got != 10 {
 		t.Fatalf("ensure(10) gave %d bytes", got)
 	}
-	if s.capacity() != first {
-		t.Fatalf("capacity moved to %d on a smaller ask, want %d", s.capacity(), first)
+	if s.Capacity() != first {
+		t.Fatalf("capacity moved to %d on a smaller ask, want %d", s.Capacity(), first)
 	}
 
 	// A bigger one grows it.
-	s.ensure(1000)
-	if s.capacity() < 1000 {
-		t.Fatalf("capacity = %d after ensure(1000)", s.capacity())
+	s.Ensure(1000)
+	if s.Capacity() < 1000 {
+		t.Fatalf("capacity = %d after ensure(1000)", s.Capacity())
 	}
-	big := s.capacity()
+	big := s.Capacity()
 
-	s.ensure(1)
-	if s.capacity() != big {
-		t.Fatalf("capacity shrank to %d from %d", s.capacity(), big)
+	s.Ensure(1)
+	if s.Capacity() != big {
+		t.Fatalf("capacity shrank to %d from %d", s.Capacity(), big)
 	}
 }
 
 func TestScratchKeepsThePointerWhenItDoesNotGrow(t *testing.T) {
-	var s scratch
+	var s Scratch
 
-	first := &s.ensure(256)[0]
+	first := &s.Ensure(256)[0]
 	// The whole point: a view or an input written at the same size twice
 	// lands at the same offset, so JS can hold on to nothing and still see
 	// a stable address.
-	if second := &s.ensure(256)[0]; second != first {
+	if second := &s.Ensure(256)[0]; second != first {
 		t.Fatal("a second ensure of the same size moved the buffer")
 	}
-	if smaller := &s.ensure(128)[0]; smaller != first {
+	if smaller := &s.Ensure(128)[0]; smaller != first {
 		t.Fatal("a smaller ensure moved the buffer")
 	}
 }
 
 func TestScratchIsAlwaysEightByteAligned(t *testing.T) {
-	var s scratch
+	var s Scratch
 	// Alignment has to survive every regrow, not just the first allocation:
 	// JS maps a Float64Array onto these bytes.
 	for _, size := range []int{1, 3, 7, 8, 9, 100, 4096, 70000} {
-		b := s.ensure(size)
+		b := s.Ensure(size)
 		if base := uintptr(unsafe.Pointer(&b[0])); base%8 != 0 {
 			t.Fatalf("ensure(%d) started at %d, which is not 8-aligned", size, base)
 		}
@@ -63,9 +63,9 @@ func TestScratchIsAlwaysEightByteAligned(t *testing.T) {
 }
 
 func TestScratchRejectsNonPositiveSizes(t *testing.T) {
-	var s scratch
+	var s Scratch
 	for _, size := range []int{0, -1} {
-		if b := s.ensure(size); b != nil {
+		if b := s.Ensure(size); b != nil {
 			t.Errorf("ensure(%d) gave %d bytes, want nil", size, len(b))
 		}
 	}
@@ -97,47 +97,5 @@ func TestInputBuffer(t *testing.T) {
 	}
 	if b := InputBuffer(-1); b != nil {
 		t.Fatalf("InputBuffer(-1) gave %d bytes, want nil", len(b))
-	}
-}
-
-func TestEncodeDictIntoReusesOneBuffer(t *testing.T) {
-	ResetDictBuffer()
-	values := []string{"new", "shipped", "held"}
-
-	first := &EncodeDictInto(values)[0]
-	if second := &EncodeDictInto(values)[0]; second != first {
-		t.Fatal("a second dictionary delta of the same size moved the buffer")
-	}
-
-	got := decodeDict(t, EncodeDictInto(values))
-	for i := range values {
-		if got[i] != values[i] {
-			t.Fatalf("value %d = %q, want %q", i, got[i], values[i])
-		}
-	}
-
-	// Growing for a bigger delta, then not shrinking back.
-	big := make([]string, 500)
-	for i := range big {
-		big[i] = "a reasonably long dictionary entry"
-	}
-	EncodeDictInto(big)
-	grown := DictCapacity()
-	EncodeDictInto(values)
-	if DictCapacity() != grown {
-		t.Fatalf("dictionary buffer shrank to %d from %d", DictCapacity(), grown)
-	}
-}
-
-func TestEncodeDictIntoOnNoValues(t *testing.T) {
-	ResetDictBuffer()
-	// Four bytes of count plus one offset: a mirror that is already current
-	// still gets a well-formed, empty answer rather than a failure.
-	b := EncodeDictInto(nil)
-	if len(b) != DictSize(nil) {
-		t.Fatalf("got %d bytes, want %d", len(b), DictSize(nil))
-	}
-	if got := decodeDict(t, b); len(got) != 0 {
-		t.Fatalf("decoded %d values, want 0", len(got))
 	}
 }

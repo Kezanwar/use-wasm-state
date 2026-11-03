@@ -72,28 +72,28 @@ export class SyncClient implements SyncEngineClient {
   dispose(): void {
     // Nothing to release: the module's memory goes when the instance is
     // dropped. Clearing the reference is what makes later calls say so
-    // rather than read a table that no longer means anything.
+    // rather than read a grid that no longer means anything.
     this.#exports = null;
   }
 
   /* ---------------------------------------------------------------- */
-  /* Tables                                                            */
+  /* Grids                                                            */
   /* ---------------------------------------------------------------- */
 
-  createTableSync(schema: readonly ColumnSpec[]): number {
-    const e = this.#e("createTable");
+  createGridSync(schema: readonly ColumnSpec[]): number {
+    const e = this.#e("createGrid");
     const bytes = encodeSchema(schema);
     return this.#timed(() =>
       check(
-        withInput(e, [bytesIn(bytes)], ([s]) => e.createTable(s.ptr, s.len)),
-        "createTable"
+        withInput(e, [bytesIn(bytes)], ([s]) => e.createGrid(s.ptr, s.len)),
+        "createGrid"
       )
     );
   }
 
-  dropTableSync(handle: number): void {
-    const e = this.#e("dropTable");
-    check(e.dropTable(handle), "dropTable");
+  dropGridSync(handle: number): void {
+    const e = this.#e("dropGrid");
+    check(e.dropGrid(handle), "dropGrid");
   }
 
   /**
@@ -242,11 +242,11 @@ export class SyncClient implements SyncEngineClient {
   /* The async face                                                    */
   /* ---------------------------------------------------------------- */
 
-  async createTable(schema: readonly ColumnSpec[]): Promise<number> {
-    return this.createTableSync(schema);
+  async createGrid(schema: readonly ColumnSpec[]): Promise<number> {
+    return this.createGridSync(schema);
   }
-  async dropTable(handle: number): Promise<void> {
-    this.dropTableSync(handle);
+  async dropGrid(handle: number): Promise<void> {
+    this.dropGridSync(handle);
   }
   async insertColumns(handle: number, columns: readonly ColumnValues[]): Promise<number> {
     return this.insertColumnsSync(handle, columns);

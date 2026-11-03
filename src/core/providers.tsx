@@ -11,6 +11,7 @@
 import { useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 import type { Mode, WasmStateDef } from "./contract";
 import { contextFor, noProviderError } from "./context";
+import { registeredPatterns } from "./patterns";
 import { createRegistry, type Registry, type UrlOverrides } from "./registry";
 
 export interface WasmStateSyncProviderProps {
@@ -76,6 +77,12 @@ function Owner({
     return () => registry.release();
   }, [registry]);
 
+  // After mount, when the entries its children import have registered.
+  const [keys] = useState(() => Object.keys(urls ?? {}));
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "production") warnUnknownPatterns(mode, keys);
+  }, [mode, keys]);
+
   const Context = contextFor(mode);
   return <Context.Provider value={registry}>{children}</Context.Provider>;
 }
@@ -92,6 +99,26 @@ function controls(registry: Registry | null, mode: Mode): WasmState {
       registry.drop(def);
     },
   };
+}
+
+/** Each unknown name once per page, however many providers repeat it. */
+const warned = new Set<string>();
+
+/**
+ * A `urls` key that names no loaded pattern is ignored, which a typo would
+ * otherwise be in silence: the engine would quietly load from its default.
+ */
+function warnUnknownPatterns(mode: Mode, keys: readonly string[]) {
+  const known = registeredPatterns();
+  for (const key of keys) {
+    if (known.has(key) || warned.has(key)) continue;
+    warned.add(key);
+    const provider = mode === "sync" ? "WasmStateSyncProvider" : "WasmStateAsyncProvider";
+    console.warn(
+      `use-wasm-state: <${provider} urls> names "${key}", which is not a pattern this page has ` +
+        `loaded, so it is ignored. Loaded: ${[...known].map((n) => `"${n}"`).join(", ") || "none"}.`
+    );
+  }
 }
 
 /** URLs as strings, so an inline `new URL(...)` compares by address. */

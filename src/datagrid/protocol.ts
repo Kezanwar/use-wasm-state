@@ -32,7 +32,7 @@ export interface WindowData {
 }
 
 /** What changed, sent back with every mutation and query. */
-export interface TableUpdate {
+export interface GridUpdate {
   revision: number;
   rowCount: number;
   totalRows: number;
@@ -44,8 +44,8 @@ export interface TableUpdate {
 
 export type Request =
   | { id: number; op: "open"; url: string; cache: boolean }
-  | { id: number; op: "createTable"; schema: readonly ColumnSpec[] }
-  | { id: number; op: "dropTable"; handle: number }
+  | { id: number; op: "createGrid"; schema: readonly ColumnSpec[] }
+  | { id: number; op: "dropGrid"; handle: number }
   | {
       id: number;
       op: "insertColumns";
@@ -83,4 +83,4 @@ export type Request =
 export type RequestBody = Body<Request>;
 
 /** A reply to a datagrid request: its update says what changed. */
-export type GridReply = Reply<TableUpdate>;
+export type GridReply = Reply<GridUpdate>;

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Rebuilds the bundled engine from engine/ into src/datagrid/datagrid.wasm, then
+ * Rebuilds the bundled engine from engine/cmd/datagrid into src/datagrid/datagrid.wasm, then
  * audits it.
  *
  * Requires TinyGo: https://tinygo.org/getting-started/install/
@@ -15,7 +15,7 @@
  * the main thread, in a worker, and in Node under vitest.
  *
  * -gc=precise is chosen over this target's default, which is `leaking`: a
- * collector that never reclaims anything, so a long-lived table only ever
+ * collector that never reclaims anything, so a long-lived grid only ever
  * grows. Measured over 400k rows arriving in batches, leaking reached 32MB
  * of linear memory where precise held at 16MB, and a 200k-row insert costs
  * 18ms against leaking's 13ms. Ten kilobytes of module size and 1.4x on the
@@ -52,10 +52,12 @@ if (run("tinygo", ["version"], { stdio: "ignore" }) === null) {
 
 mkdirSync(dirname(out), { recursive: true });
 
-console.log("building src/datagrid/datagrid.wasm");
+// From the engine module root, so ./cmd/datagrid resolves its imports of
+// engine/abi and engine/datagrid through the one go.mod.
+console.log("building src/datagrid/datagrid.wasm from engine/cmd/datagrid");
 const built = run(
   "tinygo",
-  ["build", "-target=wasm-unknown", "-gc=precise", "-no-debug", "-o", out, "."],
+  ["build", "-target=wasm-unknown", "-gc=precise", "-no-debug", "-o", out, "./cmd/datagrid"],
   {
     cwd: resolve(root, "engine"),
   }

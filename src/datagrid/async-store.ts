@@ -14,7 +14,7 @@
 import type { ColumnSpec, DecodedView } from "./abi";
 import type { WorkerClient } from "./worker-client";
 import { disposedError } from "../core/errors";
-import type { TableUpdate, WindowSpec } from "./protocol";
+import type { GridUpdate, WindowSpec } from "./protocol";
 import {
   normalizeQuery,
   toWireQuery,
@@ -68,7 +68,7 @@ interface CachedWindow<S extends SchemaSpec> {
 /**
  * Build a store for a grid the worker is still creating.
  *
- * The handle arrives a round trip later, but createTable stays synchronous
+ * The handle arrives a round trip later, but createGrid stays synchronous
  * in both modes so a component is written the same way whichever it got.
  * Until it lands, reads answer from an empty cache and mutations wait: the
  * store is simply a grid with no rows yet, which is what it is.
@@ -140,7 +140,7 @@ export function createAsyncDataGridStore<S extends SchemaSpec>(
   };
 
   /** Fold a reply into the store, unless it describes a past revision. */
-  const apply = (update: TableUpdate) => {
+  const apply = (update: GridUpdate) => {
     // Replies arrive in order, but a read issued before a mutation can
     // still land after the store has moved on. Anything older is stale.
     if (update.revision < revision) return;
@@ -193,7 +193,7 @@ export function createAsyncDataGridStore<S extends SchemaSpec>(
   // and every later await is free.
   const ready = pending.then(async (id) => {
     if (disposed) {
-      void client.dropTable(id).catch(() => {});
+      void client.dropGrid(id).catch(() => {});
       return;
     }
     handle = id;
@@ -415,7 +415,7 @@ export function createAsyncDataGridStore<S extends SchemaSpec>(
       cache.clear();
       wanted.clear();
       if (handle !== -1)
-        void client.dropTable(handle).catch(() => {
+        void client.dropGrid(handle).catch(() => {
           // The engine may already be gone; dropping a handle twice is not
           // worth surfacing.
         });
