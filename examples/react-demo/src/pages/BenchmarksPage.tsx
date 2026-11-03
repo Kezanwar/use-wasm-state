@@ -20,8 +20,8 @@ type Schema = typeof orders.spec;
 
 const IMPLS: ImplId[] = ["typical", "tuned", "wasm"];
 
-/** A winning value: the wasm accent, and bold so it never rests on colour alone. */
-const WIN = "text-wasm font-semibold";
+/** A winning value: green, and bold so it never rests on colour alone. */
+const WIN = "text-emerald-700 dark:text-emerald-400 font-semibold";
 
 /** ?quick shrinks the run to seconds, for the browser tests. */
 const QUICK = typeof location !== "undefined" && new URLSearchParams(location.search).has("quick");
