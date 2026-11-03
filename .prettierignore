@@ -1,0 +1,12 @@
+dist/
+coverage/
+examples/react-demo/dist/
+src/**/*.wasm
+playwright-report/
+test-results/
+pnpm-lock.yaml
+internal_docs/
+
+# Markdown is hand-formatted. Prettier re-aligns tables and flattens the
+# comment alignment in code samples, which is deliberate there.
+*.md
