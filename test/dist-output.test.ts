@@ -30,6 +30,24 @@ describe.skipIf(!built)("dist", () => {
     expect(existsSync(dist("index.d.cts"))).toBe(true);
   });
 
+  it("ships the worker as its own bundle, without React", () => {
+    // The worker carries the engine and nothing else: the main entry
+    // imports React, which a worker has no business loading.
+    expect(existsSync(dist("worker.js"))).toBe(true);
+    const worker = readFileSync(dist("worker.js"), "utf8");
+    expect(worker).not.toMatch(/from ["']react["']/);
+    expect(worker).not.toMatch(/require\(["']react["']\)/);
+  });
+
+  it("keeps the worker self-contained", () => {
+    // A bundler copying worker.js as an asset URL copies that one file.
+    // If it imported a shared chunk, the worker would 404 on it in the
+    // production build and nowhere else, which is how this was found.
+    const worker = readFileSync(dist("worker.js"), "utf8");
+    expect(worker).not.toMatch(/from\s*["']\.\/chunk-/);
+    expect(worker).not.toMatch(/import\s*\(\s*["']\.\//);
+  });
+
   it("ships the engine next to the bundles", () => {
     // Consumers resolve it with new URL("./engine.wasm", import.meta.url),
     // so it has to sit beside index.js, not in a sub-directory.
@@ -69,7 +87,7 @@ describe.skipIf(!built)("dist", () => {
     // They are react-use-wasm's API, copied in. Re-exporting them would
     // make a second copy of it something this package has to support.
     const types = readFileSync(dist("index.d.ts"), "utf8");
-    for (const name of ["unpack", "loadModule", "WASM_WORKER_SOURCE", "withInput"]) {
+    for (const name of ["unpack", "loadModule", "createHost", "withInput"]) {
       expect(types, name).not.toContain(name);
     }
   });

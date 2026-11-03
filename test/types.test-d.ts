@@ -2,10 +2,15 @@ import { assertType, describe, expectTypeOf, it } from "vitest";
 import {
   defineSchema,
   useTableQuery,
+  useTableStats,
   useTableView,
   useWasmTable,
+  type AsyncTableStore,
   type Row,
+  type RowIds,
   type TableQuery,
+  type TableReader,
+  type TableStats,
   type TableStore,
   type TableView,
 } from "../src/index";
@@ -209,5 +214,46 @@ describe("queries", () => {
   it("carries the schema through useTableQuery", () => {
     expectTypeOf(useTableQuery(table)).toEqualTypeOf<Required<TableQuery<Schema>> | null>();
     assertType<Required<TableQuery<Schema>> | null>(useTableQuery<Schema>(null));
+  });
+});
+
+declare const asyncTable: AsyncTableStore<Schema>;
+
+describe("modes", () => {
+  it("gives a TableStore by default", () => {
+    const result = useWasmTable(schema);
+    if (result.status === "ready") {
+      expectTypeOf(result.table).toEqualTypeOf<TableStore<Schema>>();
+    }
+  });
+
+  it("gives an AsyncTableStore in worker mode", () => {
+    const result = useWasmTable(schema, { mode: "worker" });
+    if (result.status === "ready") {
+      expectTypeOf(result.table).toEqualTypeOf<AsyncTableStore<Schema>>();
+    }
+  });
+
+  it("returns Promises from a worker store's mutations", () => {
+    expectTypeOf(asyncTable.setCell(0, "price", 1)).toEqualTypeOf<Promise<void>>();
+    expectTypeOf(asyncTable.insertRows([])).toEqualTypeOf<Promise<RowIds>>();
+    expectTypeOf(asyncTable.sortBy("price", "asc")).toEqualTypeOf<Promise<void>>();
+  });
+
+  it("keeps the sync store's mutations synchronous", () => {
+    expectTypeOf(table.setCell(0, "price", 1)).toEqualTypeOf<void>();
+    expectTypeOf(table.insertRows([])).toEqualTypeOf<RowIds>();
+  });
+
+  it("takes either store in the read hooks", () => {
+    assertType<TableView<Schema> | null>(useTableView(asyncTable, 0, 10));
+    assertType<TableView<Schema> | null>(useTableView(table, 0, 10));
+    assertType<TableStats | null>(useTableStats(asyncTable));
+    assertType<Required<TableQuery<Schema>> | null>(useTableQuery(asyncTable));
+  });
+
+  it("satisfies TableReader from both", () => {
+    assertType<TableReader<Schema>>(asyncTable);
+    assertType<TableReader<Schema>>(table);
   });
 });

@@ -36,3 +36,21 @@ test("falls back when the host sends the wrong MIME type", async ({ page }) => {
   await page.goto(loaded(BAD_MIME));
   await expect(page.getByTestId("row-count")).toHaveText("200,000", { timeout: 60_000 });
 });
+
+test("a strict worker-src still loads the worker", async ({ page }) => {
+  // The worker is a real module beside the bundle, not a blob, so a CSP
+  // naming worker-src 'self' allows it. A blob: worker would be refused
+  // here, which is the whole reason workerUrl exists as an escape hatch.
+  const violations: string[] = [];
+  page.on("console", (message) => {
+    if (/content security policy/i.test(message.text())) violations.push(message.text());
+  });
+
+  await page.goto("http://localhost:4178/csp/#examples");
+  await expect(page.getByTestId("row-count")).toHaveText("200,000", { timeout: 60_000 });
+
+  await page.getByTestId("mode-worker").click();
+  await expect(page.getByTestId("row-count")).toHaveText("200,000", { timeout: 60_000 });
+  expect(page.locator('[role="row"]').first()).toBeTruthy();
+  expect(violations).toEqual([]);
+});

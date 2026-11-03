@@ -4,8 +4,8 @@ React state that lives in a WebAssembly engine written in Go (TinyGo). Not
 generic state: it ships a prebuilt engine and exposes data structures whose
 operations run in wasm. First structure: a table.
 
-Status: pre-release. Sync (main thread) mode only. Worker mode and shared
-tables are not implemented and throw a recognisable error.
+Status: pre-release. Sync and worker modes both work. Shared tables are not
+implemented and report a recognisable error.
 
 ## The model
 
@@ -72,8 +72,8 @@ Creates a private engine with one table. Returns a discriminated union:
 
 `isReady` narrows after destructuring; `status` narrows before.
 
-Options: `wasmUrl`, `initialRows`, `shared` (not implemented), `mode`
-(`"worker"` not implemented). The schema is read once on mount.
+Options: `wasmUrl`, `workerUrl`, `initialRows`, `mode` (`"sync"` or
+`"worker"`), `shared` (not implemented). The schema is read once on mount.
 
 ### `useTableView(table, start, count)`
 
@@ -87,6 +87,8 @@ that must update without reading rows.
 ### `useTableQuery(table)`
 
 The current `{ sort, filters, search }` or `null`. For a toolbar.
+
+All three read hooks take a `TableReader`, which both store types satisfy.
 
 ## Sort, filter and search
 
@@ -128,6 +130,35 @@ per dictionary entry and a 200k-row sort is one pass over the rows.
 `useTableQuery(table)` gives a toolbar the active query, reactive on the
 same revision the rows are.
 
+## Worker mode
+
+```tsx
+const { status, table } = useWasmTable(schema, { mode: "worker" });
+```
+
+The engine moves off the main thread. Reads stay synchronous, because the
+worker sends rows for every window on screen with each reply, so one round
+trip covers a whole user action. Mutations return Promises, because they
+really do cross a thread:
+
+```tsx
+await table.setCell(rowId, "price", 12.5);
+await table.sortBy("price", "desc");
+```
+
+The option types the result: `mode: "worker"` gives an `AsyncTableStore`,
+anything else a `TableStore`. Both satisfy `TableReader`, which is what
+`useTableView`, `useTableStats` and `useTableQuery` take, so a component
+that only reads does not care which it was handed.
+
+While a window is in flight the store answers with the nearest rows it
+already has, carrying their own `start`, so a grid draws them where they
+belong rather than blanking.
+
+The worker bundle is resolved with `new URL("./worker.js", import.meta.url)`,
+the same way `engine.wasm` is. Pass `workerUrl` where a CSP names an
+explicit `worker-src`.
+
 ## Store
 
 `createEngine(options?) -> Promise<Engine>` for use outside React.
@@ -152,7 +183,9 @@ readonly revision: number
 readonly rowCount: number    // live rows
 readonly totalRows: number   // including tombstones
 
-view(start, count): TableView<S>
+view(start, count): TableView<S>              // best-effort
+readWindow(start, count): Promise<TableView<S>>  // the real rows
+watch(start, count): () => void               // this window is on screen
 subscribe(listener: () => void): () => void
 dispose(): void
 ```
@@ -207,5 +240,5 @@ thread, in a worker, and in Node.
 
 ## What is not built yet
 
-`mode: "worker"` and `options.shared`. Each reports a `WasmStateError` with
-code `not_implemented` rather than failing quietly.
+`options.shared`. It reports a `WasmStateError` with code
+`not_implemented` rather than failing quietly.

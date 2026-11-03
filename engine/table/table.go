@@ -96,6 +96,10 @@ func (d *ColumnData) packed() bool { return d.Offsets != nil }
 
 func newTable(s Schema) *Table {
 	t := &Table{schema: s.clone()}
+	// Seeded with the empty query's own bytes rather than left nil, so
+	// setting an empty query on a fresh table compares equal and does not
+	// bump the revision for a change nobody made.
+	t.query = appendQuery(nil, &t.parsed)
 	t.cols = make([]column, len(t.schema))
 	for i := range t.schema {
 		t.cols[i].typ = t.schema[i].Type

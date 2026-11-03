@@ -41,7 +41,7 @@ export interface RowIds extends Iterable<number> {
   toArray(): number[];
 }
 
-function rowIds(first: number, length: number): RowIds {
+export function rowIds(first: number, length: number): RowIds {
   return {
     first,
     length,
@@ -83,9 +83,69 @@ export interface TableView<S extends SchemaSpec> {
 /* The store                                                           */
 /* ------------------------------------------------------------------ */
 
-export interface TableStore<S extends SchemaSpec = SchemaSpec> {
+/**
+ * What a table can be read through, whichever thread its engine is on.
+ *
+ * The sync and worker stores differ only in their mutations: one returns
+ * void, the other a Promise. Reads are identical and synchronous in both,
+ * because React reads during render and cannot await. This is what
+ * useTableView, useTableStats and useTableQuery take, so a component does
+ * not care which mode it was handed.
+ */
+export interface TableReader<S extends SchemaSpec = SchemaSpec> {
   readonly schema: TableSchema<S>;
 
+  /**
+   * The subscription token: a counter that moves whenever any read could
+   * now return something different.
+   *
+   * Not the revision. In worker mode a window can arrive without the data
+   * having changed at all, and a hook keyed on the revision would never
+   * re-render to look at it. This is what useSyncExternalStore snapshots.
+   */
+  readonly version: number;
+  /** Bumped by every mutation that changed something. */
+  readonly revision: number;
+  /** Live rows. */
+  readonly rowCount: number;
+  /** Rows ever inserted, tombstones included. */
+  readonly totalRows: number;
+  /** The query as it was last set. */
+  readonly query: Required<TableQuery<S>>;
+
+  /**
+   * Read a window.
+   *
+   * The same (revision, start, count) gives back the identical object, so
+   * it can be a useSyncExternalStore snapshot.
+   */
+  view(start: number, count: number): TableView<S>;
+
+  /**
+   * Read a window, for certain.
+   *
+   * `view` is best-effort: in worker mode it answers with the nearest rows
+   * it already has so a grid never blanks. This waits for the real ones,
+   * which is what an operation over rows that are not on screen needs,
+   * such as deleting a selected range.
+   */
+  readWindow(start: number, count: number): Promise<TableView<S>>;
+
+  /**
+   * Declare that a window is on screen.
+   *
+   * The sync store has nothing to do with this; the worker store uses it
+   * to have every reply carry fresh rows for the windows being shown, so
+   * scrolling costs no extra round trip. Returns a function to call when
+   * the window goes away.
+   */
+  watch(start: number, count: number): () => void;
+
+  /** Called after any mutation that moved the revision. */
+  subscribe(listener: () => void): () => void;
+}
+
+export interface TableStore<S extends SchemaSpec = SchemaSpec> extends TableReader<S> {
   /** Append rows given as objects. Converted to columns here. */
   insertRows(rows: readonly Row<S>[]): RowIds;
   /**
@@ -117,26 +177,6 @@ export interface TableStore<S extends SchemaSpec = SchemaSpec> {
   search(text: string): void;
   /** Back to live rows in id order. */
   clearQuery(): void;
-  /** The query as it was last set. */
-  readonly query: Required<TableQuery<S>>;
-
-  /** Bumped by every mutation that changed something. */
-  readonly revision: number;
-  /** Live rows. */
-  readonly rowCount: number;
-  /** Rows ever inserted, tombstones included. */
-  readonly totalRows: number;
-
-  /**
-   * Read a window.
-   *
-   * The same (revision, start, count) gives back the identical object, so
-   * it can be a useSyncExternalStore snapshot.
-   */
-  view(start: number, count: number): TableView<S>;
-
-  /** Called after any mutation that moved the revision. */
-  subscribe(listener: () => void): () => void;
 
   /** Drop the table. Any later call throws. */
   dispose(): void;
@@ -167,6 +207,7 @@ export function createTableStore<S extends SchemaSpec>(
   }
 
   let disposed = false;
+  let version = 0;
   let revision = client.revisionSync(handle);
   let cache: CachedView<S> | null = null;
 
@@ -199,6 +240,7 @@ export function createTableStore<S extends SchemaSpec>(
     const next = client.revisionSync(handle);
     if (next === revision) return;
     revision = next;
+    version++;
     // The cache is keyed on the revision, so a changed revision retires it
     // without having to be cleared. Clearing anyway keeps the window data
     // from outliving the table it describes.
@@ -299,6 +341,10 @@ export function createTableStore<S extends SchemaSpec>(
       return query;
     },
 
+    get version() {
+      alive("version");
+      return version;
+    },
     get revision() {
       alive("revision");
       return revision;
@@ -327,6 +373,20 @@ export function createTableStore<S extends SchemaSpec>(
       return value;
     },
 
+    // The engine is on this thread, so the exact rows are always a
+    // synchronous read away.
+    async readWindow(start: number, count: number) {
+      alive("readWindow");
+      return store.view(start, count);
+    },
+
+    // Nothing to do, for the same reason. It exists so one component can
+    // drive either store.
+    watch() {
+      alive("watch");
+      return () => {};
+    },
+
     subscribe(listener) {
       listeners.add(listener);
       return () => void listeners.delete(listener);
@@ -344,7 +404,7 @@ export function createTableStore<S extends SchemaSpec>(
   return store;
 }
 
-function makeView<S extends SchemaSpec>(
+export function makeView<S extends SchemaSpec>(
   schema: TableSchema<S>,
   decoded: { start: number; ids: Int32Array; columns: (Int32Array | Float64Array)[] },
   mirrors: Map<number, string[]>

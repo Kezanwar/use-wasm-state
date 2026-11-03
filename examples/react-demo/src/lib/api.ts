@@ -6,23 +6,23 @@
  * src/index.ts and not documented here fails that test.
  */
 export const API = {
-  useWasmTable: `function useWasmTable<S extends SchemaSpec>(
+  useWasmTable: `function useWasmTable<S extends SchemaSpec, M extends Mode = "sync">(
   schema: TableSchema<S>,
-  options?: UseWasmTableOptions<S>
-): UseWasmTableResult<S>;`,
+  options?: UseWasmTableOptions<S, M>
+): UseWasmTableResult<S, M>;`,
 
   useTableView: `function useTableView<S extends SchemaSpec>(
-  table: TableStore<S> | null,
+  table: TableReader<S> | null,
   start: number,
   count: number
 ): TableView<S> | null;`,
 
   useTableStats: `function useTableStats<S extends SchemaSpec>(
-  table: TableStore<S> | null
+  table: TableReader<S> | null
 ): TableStats | null;`,
 
   useTableQuery: `function useTableQuery<S extends SchemaSpec>(
-  table: TableStore<S> | null
+  table: TableReader<S> | null
 ): Required<TableQuery<S>> | null;`,
 
   defineSchema: `function defineSchema<const S extends SchemaSpec>(
@@ -131,16 +131,54 @@ defineSchema({ id: "i32", name: "string", price: "f64" });`,
 
   StringOp: `type StringOp = "eq" | "ne" | "contains";`,
 
-  createEngine: `function createEngine(options?: EngineOptions): Promise<Engine>;`,
+  createEngine: `function createEngine<M extends Mode = "sync">(
+  options?: EngineOptions & { mode?: M }
+): Promise<Engine<M>>;`,
 
-  Engine: `interface Engine {
-  createTable<S extends SchemaSpec>(schema: TableSchema<S>): TableStore<S>;
+  Mode: `type Mode = "sync" | "worker";`,
+
+  StoreFor: `type StoreFor<M extends Mode, S extends SchemaSpec> =
+  M extends "worker" ? AsyncTableStore<S> : TableStore<S>;`,
+
+  TableReader: `interface TableReader<S extends SchemaSpec> {
+  readonly schema: TableSchema<S>;
+  readonly version: number;
+  readonly revision: number;
+  readonly rowCount: number;
+  readonly totalRows: number;
+  readonly query: Required<TableQuery<S>>;
+
+  view(start: number, count: number): TableView<S>;
+  readWindow(start: number, count: number): Promise<TableView<S>>;
+  watch(start: number, count: number): () => void;
+  subscribe(listener: () => void): () => void;
+}`,
+
+  AsyncTableStore: `interface AsyncTableStore<S extends SchemaSpec> extends TableReader<S> {
+  insertRows(rows: readonly Row<S>[]): Promise<RowIds>;
+  insertColumns(columns: ColumnsInput<S>): Promise<RowIds>;
+  setCell(rowId: number, column: K, value: Row<S>[K]): Promise<void>;
+  deleteRows(rowIds: ArrayLike<number>): Promise<void>;
+
+  setQuery(query: TableQuery<S>): Promise<void>;
+  sortBy(column, direction?): Promise<void>;
+  filter(clauses: readonly FilterClause<S>[]): Promise<void>;
+  search(text: string): Promise<void>;
+  clearQuery(): Promise<void>;
+
+  dispose(): void;
+}`,
+
+  Engine: `interface Engine<M extends Mode = Mode> {
+  readonly mode: M;
+  createTable<S extends SchemaSpec>(schema: TableSchema<S>): StoreFor<M, S>;
   dispose(): void;
 }`,
 
   EngineOptions: `interface EngineOptions {
-  mode?: "sync" | "worker";
+  mode?: Mode;
   wasmUrl?: string | URL;
+  workerUrl?: string | URL;
   cache?: boolean;
 }`,
 
@@ -155,16 +193,17 @@ defineSchema({ id: "i32", name: "string", price: "f64" });`,
   | "row-count" | "bad-schema" | "bad-argument"
   | "disposed" | "not_implemented" | "engine";`,
 
-  UseWasmTableResult: `type UseWasmTableResult<S extends SchemaSpec> =
-  | { status: "loading"; isReady: false; table: null;           error: null }
-  | { status: "ready";   isReady: true;  table: TableStore<S>;  error: null }
-  | { status: "error";   isReady: false; table: null;           error: Error };`,
+  UseWasmTableResult: `type UseWasmTableResult<S extends SchemaSpec, M extends Mode> =
+  | { status: "loading"; isReady: false; table: null;             error: null }
+  | { status: "ready";   isReady: true;  table: StoreFor<M, S>;   error: null }
+  | { status: "error";   isReady: false; table: null;             error: Error };`,
 
-  UseWasmTableOptions: `interface UseWasmTableOptions<S extends SchemaSpec> {
+  UseWasmTableOptions: `interface UseWasmTableOptions<S extends SchemaSpec, M extends Mode> {
   wasmUrl?: string | URL;
+  workerUrl?: string | URL;
   initialRows?: readonly Row<S>[];
   shared?: string;
-  mode?: "sync" | "worker";
+  mode?: M;
 }`,
 } as const satisfies Record<string, string>;
 

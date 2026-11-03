@@ -1,12 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { cn } from "cn";
-import { useTableQuery, useTableView, type SortDirection, type TableStore } from "use-wasm-state";
+import {
+  useTableQuery,
+  useTableView,
+  type AsyncTableStore,
+  type SortDirection,
+  type TableStore,
+} from "use-wasm-state";
 import { useVirtualWindow } from "@/hooks/useVirtualWindow";
 import { formatDate, formatPrice } from "@/lib/format";
 import type { Order, schema } from "@/lib/orders";
 
 type Schema = typeof schema.spec;
+
+/**
+ * Either store. They differ only in whether a mutation returns a Promise,
+ * and the grid never looks at the return, so one component drives both.
+ */
+export type AnyTable = TableStore<Schema> | AsyncTableStore<Schema>;
 
 const ROW_HEIGHT = 32;
 
@@ -47,7 +59,9 @@ export const selectionRange = (s: Selection) => ({
 });
 
 export interface GridProps {
-  table: TableStore<Schema>;
+  table: AnyTable;
+  /** Worker mode fetches a window a round trip later, so it reads ahead. */
+  overscan?: number;
   rowCount: number;
   selection: Selection | null;
   onSelectionChange: (selection: Selection | null) => void;
@@ -168,7 +182,10 @@ export function Grid({ table, rowCount, selection, onSelectionChange, onEdit, on
       {/* Sized to the whole table so the scrollbar tells the truth, while
           only the visible rows exist in the DOM. */}
       <div style={{ height: window.totalHeight }} className="relative">
-        <div style={{ transform: `translateY(${window.offsetY}px)` }}>
+        {/* Positioned from the view's own start, not the window we asked
+            for. In worker mode the rows may be a round trip behind, and
+            drawing them where they actually belong beats blanking. */}
+        <div style={{ transform: `translateY(${(view?.start ?? window.start) * ROW_HEIGHT}px)` }}>
           {view?.ids.length
             ? Array.from({ length: view.length }, (_, i) => {
                 const row = window.start + i;
@@ -301,7 +318,7 @@ function Cell({
  * Three states on one control, and the arrow says which one you are in, so
  * there is nothing to explain.
  */
-function cycleSort(table: TableStore<Schema>, column: keyof Order, shift: boolean) {
+function cycleSort(table: AnyTable, column: keyof Order, shift: boolean) {
   const sort = table.query.sort;
   const at = sort.findIndex((key) => key.column === column);
   const current: SortDirection | undefined = at === -1 ? undefined : sort[at]!.direction;

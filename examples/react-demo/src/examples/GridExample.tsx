@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useTableQuery, useTableStats, useWasmTable } from "use-wasm-state";
-import { Grid, selectionRange } from "@/components/Grid";
+import { useTableQuery, useTableStats, useWasmTable, type TableQuery } from "use-wasm-state";
+import { Grid, selectionRange, type AnyTable } from "@/components/Grid";
 import { StatusBar } from "@/components/StatusBar";
 import { Toolbar } from "@/components/Toolbar";
 import { useFrameRate } from "@/hooks/useFrameRate";
@@ -10,14 +10,53 @@ const INITIAL_ROWS = 200_000;
 const APPEND_ROWS = 10_000;
 
 /**
- * Two hundred thousand orders, scrolled and edited in place.
+ * A worker answers a window a round trip later, so it reads further ahead.
+ * Not much further: every extra row is one more to decode and render on
+ * each reply, and past a point that costs more than the round trip.
+ */
+const OVERSCAN = { sync: 8, worker: 16 } as const;
+
+type Mode = "sync" | "worker";
+
+/**
+ * Two hundred thousand orders, scrolled, sorted, filtered and edited.
  *
  * Nothing here holds row data in React state. The grid renders whatever
  * the current view returns, and the view is whatever the engine's revision
  * says it is.
  */
 export function GridExample() {
-  const { status, table, error } = useWasmTable(schema);
+  const [mode, setMode] = useState<Mode>("sync");
+  // Survives the remount below, so switching modes reloads the same rows
+  // into the other engine and leaves the sort and filters where they were.
+  const carried = useRef<TableQuery<typeof schema.spec>>({});
+
+  // Remounted on a mode change, so each mode gets a clean engine and the
+  // one it replaces is disposed. The generator is seeded, so the data that
+  // comes back is the data that left.
+  return (
+    <Surface
+      key={mode}
+      mode={mode}
+      onMode={setMode}
+      initialQuery={carried.current}
+      onQuery={(query) => (carried.current = query)}
+    />
+  );
+}
+
+function Surface({
+  mode,
+  onMode,
+  initialQuery,
+  onQuery,
+}: {
+  mode: Mode;
+  onMode: (mode: Mode) => void;
+  initialQuery: TableQuery<typeof schema.spec>;
+  onQuery: (query: TableQuery<typeof schema.spec>) => void;
+}) {
+  const { status, table, error } = useWasmTable(schema, { mode });
   const stats = useTableStats(table);
   const query = useTableQuery(table);
   const fps = useFrameRate();
@@ -31,7 +70,12 @@ export function GridExample() {
   const timed = useCallback(<T,>(run: () => T): T => {
     const started = performance.now();
     const result = run();
-    setLastMs(performance.now() - started);
+    // A worker call resolves later, so the clock stops when it does.
+    if (result instanceof Promise) {
+      void result.finally(() => setLastMs(performance.now() - started));
+    } else {
+      setLastMs(performance.now() - started);
+    }
     return result;
   }, []);
 
@@ -41,19 +85,30 @@ export function GridExample() {
     if (!table || loaded.current) return;
     loaded.current = true;
     const columns = generateOrders(INITIAL_ROWS);
-    timed(() => table.insertColumns(columns));
-  }, [table, timed]);
+    void Promise.resolve(timed(() => table.insertColumns(columns))).then(() => {
+      // Re-applied after the rows, so a sort has something to sort. An
+      // empty carried query is skipped rather than sent, to save a round
+      // trip that would change nothing.
+      const carries =
+        (initialQuery.sort?.length ?? 0) > 0 ||
+        (initialQuery.filters?.length ?? 0) > 0 ||
+        (initialQuery.search ?? "") !== "";
+      if (carries) void table.setQuery(initialQuery);
+    });
+  }, [table, timed, initialQuery]);
+
+  // Remembered for the other mode, outside this component's lifetime.
+  useEffect(() => {
+    if (query) onQuery(query);
+  }, [query, onQuery]);
 
   const append = () => {
     if (!table) return;
     setBusy(true);
     const columns = generateOrders(APPEND_ROWS, table.totalRows);
-    timed(() => table.insertColumns(columns));
-    setBusy(false);
+    void Promise.resolve(timed(() => table.insertColumns(columns))).finally(() => setBusy(false));
   };
 
-  // Which status chips are on. Read back off the query rather than kept
-  // beside it, so the chips cannot disagree with the rows.
   const statuses =
     (query?.filters.find((f) => f.column === "status" && f.op === "in")?.value as
       readonly string[] | undefined) ?? STATUSES;
@@ -70,11 +125,13 @@ export function GridExample() {
     setSelection(null);
   };
 
-  const remove = useCallback(() => {
+  const remove = useCallback(async () => {
     if (!table || !selection) return;
     const { from, to } = selectionRange(selection);
-    // Row ids, not offsets: offsets shift when rows go, ids never do.
-    const ids = table.view(from, to - from + 1).ids;
+    // Row ids, not offsets: offsets shift when rows go, ids never do. And
+    // readWindow rather than view, because a selection can run past what
+    // is on screen and those ids have to be the real ones.
+    const { ids } = await table.readWindow(from, to - from + 1);
     timed(() => table.deleteRows(ids));
     setSelection(null);
   }, [table, selection, timed]);
@@ -84,7 +141,7 @@ export function GridExample() {
       if (event.key !== "Delete" && event.key !== "Backspace") return;
       if (!selection || document.activeElement?.tagName === "INPUT") return;
       event.preventDefault();
-      remove();
+      void remove();
     };
     globalThis.addEventListener("keydown", onKeyDown);
     return () => globalThis.removeEventListener("keydown", onKeyDown);
@@ -105,6 +162,8 @@ export function GridExample() {
   return (
     <div className="flex h-[32rem] flex-col overflow-hidden rounded-xl border">
       <Toolbar
+        mode={mode}
+        onMode={onMode}
         selectedCount={selectedCount}
         search={query?.search ?? ""}
         statuses={statuses}
@@ -119,14 +178,15 @@ export function GridExample() {
           )
         }
         onAppend={append}
-        onDelete={remove}
+        onDelete={() => void remove()}
         busy={busy || status !== "ready"}
       />
 
       {status === "ready" && stats ? (
         <Grid
-          table={table}
+          table={table as AnyTable}
           rowCount={stats.rowCount}
+          overscan={OVERSCAN[mode]}
           selection={selection}
           onSelectionChange={setSelection}
           onEdit={timed}

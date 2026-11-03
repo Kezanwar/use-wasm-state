@@ -240,6 +240,28 @@ export function ApiPage() {
       </Group>
 
       <Group title="Store">
+        <Entry name="TableReader" kind="type" signature={API.TableReader}>
+          <p>
+            What both store types share: every read, and all of them synchronous, because React
+            reads during render and cannot await. <code>useTableView</code>,{" "}
+            <code>useTableStats</code> and <code>useTableQuery</code> take this, so a component does
+            not care which mode it was handed.
+          </p>
+          <Fields
+            rows={[
+              ["version", "The subscription token. Moves whenever any read could now differ."],
+              ["view", "Best-effort. In worker mode, the nearest rows it has rather than nothing."],
+              ["readWindow", "The real rows, waited for. What an edit over off-screen rows needs."],
+              [
+                "watch",
+                "Say a window is on screen. In worker mode that is what makes every reply carry its rows.",
+              ],
+            ]}
+          />
+        </Entry>
+
+        <Separator />
+
         <Entry name="TableStore" kind="type" signature={API.TableStore}>
           <p>One table. Framework-agnostic, and what the hooks hand back.</p>
           <Fields
@@ -287,6 +309,16 @@ export function ApiPage() {
             What <code>useTableStats</code> returns.
           </p>
         </Entry>
+
+        <Separator />
+
+        <Entry name="AsyncTableStore" kind="type" signature={API.AsyncTableStore}>
+          <p>
+            What worker mode hands back. The reads are the same and still synchronous; the mutations
+            return Promises, because they really do cross a thread. The worker sends rows for every
+            window on screen with each reply, so one round trip covers a whole user action.
+          </p>
+        </Entry>
       </Group>
 
       <Group title="Engine">
@@ -309,8 +341,24 @@ export function ApiPage() {
 
         <Entry name="EngineOptions" kind="type" signature={API.EngineOptions}>
           <p>
-            <code>cache</code> reuses the compiled module across engines with the same URL.
+            <code>cache</code> reuses the compiled module across engines with the same URL.{" "}
+            <code>workerUrl</code> is for a CSP that names an explicit <code>worker-src</code>.
           </p>
+        </Entry>
+
+        <Separator />
+
+        <Entry name="Mode" kind="type" signature={API.Mode}>
+          <p>
+            <code>sync</code> runs the engine on the main thread; <code>worker</code> moves it off,
+            which makes mutations async and a long sort something the page can scroll through.
+          </p>
+        </Entry>
+
+        <Separator />
+
+        <Entry name="StoreFor" kind="type" signature={API.StoreFor}>
+          <p>Which store a mode produces, so the option types the result.</p>
         </Entry>
       </Group>
 

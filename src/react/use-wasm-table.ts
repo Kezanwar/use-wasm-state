@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import { createEngine, type Engine } from "../store/create-engine";
+import { createEngine, type Engine, type Mode, type StoreFor } from "../store/create-engine";
 import { notImplementedError } from "../engine/errors";
 import { sameShape, type Row, type SchemaSpec, type TableSchema } from "../store/schema";
-import type { TableStore } from "../store/table-store";
 
-export interface UseWasmTableOptions<S extends SchemaSpec> {
+export interface UseWasmTableOptions<S extends SchemaSpec, M extends Mode = "sync"> {
   /** Where to fetch engine.wasm from. See EngineOptions.wasmUrl. */
   wasmUrl?: string | URL;
   /** Rows to load once, as soon as the table exists. */
@@ -16,9 +15,16 @@ export interface UseWasmTableOptions<S extends SchemaSpec> {
    */
   shared?: string;
   /**
-   * Run the engine in a Web Worker. Build step 8. Throws until then.
+   * Where the engine runs.
+   *
+   * "sync" reads viewports during render and mutations return void.
+   * "worker" moves the engine off the main thread: reads stay synchronous,
+   * because the worker sends rows for every window on screen with each
+   * reply, but mutations return Promises.
    */
-  mode?: "sync" | "worker";
+  mode?: M;
+  /** Where to fetch the worker bundle from, in worker mode. */
+  workerUrl?: string | URL;
 }
 
 /**
@@ -26,9 +32,9 @@ export interface UseWasmTableOptions<S extends SchemaSpec> {
  * discriminant alongside `status`, and still narrows after destructuring.
  * A derived boolean would not.
  */
-export type UseWasmTableResult<S extends SchemaSpec> =
+export type UseWasmTableResult<S extends SchemaSpec, M extends Mode = "sync"> =
   | { status: "loading"; isReady: false; table: null; error: null }
-  | { status: "ready"; isReady: true; table: TableStore<S>; error: null }
+  | { status: "ready"; isReady: true; table: StoreFor<M, S>; error: null }
   | { status: "error"; isReady: false; table: null; error: Error };
 
 const LOADING = { status: "loading", isReady: false, table: null, error: null } as const;
@@ -48,18 +54,19 @@ const LOADING = { status: "loading", isReady: false, table: null, error: null } 
  * a table that already holds rows, so it is ignored (and warned about in
  * development).
  */
-export function useWasmTable<S extends SchemaSpec>(
+export function useWasmTable<S extends SchemaSpec, M extends Mode = "sync">(
   schema: TableSchema<S>,
-  options: UseWasmTableOptions<S> = {}
-): UseWasmTableResult<S> {
-  const { wasmUrl, initialRows, shared, mode } = options;
+  options: UseWasmTableOptions<S, M> = {}
+): UseWasmTableResult<S, M> {
+  const { wasmUrl, workerUrl, initialRows, shared, mode } = options;
 
   // An inline `new URL(...)` is a different object every render but the
   // same address. Depending on the string means it does not tear the
   // engine down and build it again on each one.
   const wasmUrlKey = wasmUrl === undefined ? undefined : String(wasmUrl);
+  const workerUrlKey = workerUrl === undefined ? undefined : String(workerUrl);
 
-  const [state, setState] = useState<UseWasmTableResult<S>>(LOADING);
+  const [state, setState] = useState<UseWasmTableResult<S, M>>(LOADING);
 
   // Read once, on mount. Keeping them in a ref means a new options object
   // every render does not tear the table down and build it again.
@@ -83,15 +90,13 @@ export function useWasmTable<S extends SchemaSpec>(
     // hook, not of the render. Reporting it through status means a consumer
     // handles it the same way it handles a missing .wasm, instead of
     // needing an error boundary for a typo.
-    const unsupported =
-      shared !== undefined
-        ? notImplementedError("options.shared", "build step 9")
-        : mode === "worker"
-          ? notImplementedError('mode "worker"', "build step 8")
-          : null;
-
-    if (unsupported) {
-      setState({ status: "error", isReady: false, table: null, error: unsupported });
+    if (shared !== undefined) {
+      setState({
+        status: "error",
+        isReady: false,
+        table: null,
+        error: notImplementedError("options.shared", "build step 9"),
+      });
       return;
     }
 
@@ -99,24 +104,28 @@ export function useWasmTable<S extends SchemaSpec>(
     // still loading when the cleanup runs, so it is disposed as soon as it
     // arrives rather than left behind holding a wasm instance.
     let cancelled = false;
-    let engine: Engine | null = null;
+    let engine: Engine<Mode> | null = null;
 
     setState(LOADING);
 
     (async () => {
       try {
-        const created = await createEngine({ wasmUrl: wasmUrlKey, mode: "sync" });
+        const created = await createEngine({
+          wasmUrl: wasmUrlKey,
+          workerUrl: workerUrlKey,
+          mode: (mode ?? "sync") as M,
+        });
         if (cancelled) {
           created.dispose();
           return;
         }
         engine = created;
 
-        const table = created.createTable(schemaRef.current);
+        const table = created.createTable(schemaRef.current) as StoreFor<M, S>;
         // Loaded here rather than in a second effect, so a double mount
         // cannot insert them twice: this table was created a line ago and
         // is thrown away whole if the mount is cancelled.
-        if (initialRef.current?.length) table.insertRows(initialRef.current);
+        if (initialRef.current?.length) await table.insertRows(initialRef.current);
 
         if (cancelled) {
           created.dispose();
@@ -140,7 +149,7 @@ export function useWasmTable<S extends SchemaSpec>(
       engine?.dispose();
       engine = null;
     };
-  }, [wasmUrlKey, shared, mode]);
+  }, [wasmUrlKey, workerUrlKey, shared, mode]);
 
   return state;
 }

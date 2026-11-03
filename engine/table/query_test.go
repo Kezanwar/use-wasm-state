@@ -767,3 +767,17 @@ func TestLowercaseMirrorGrowsWithTheDictionary(t *testing.T) {
 		t.Fatalf("lower = %v after an edit", c.dict.lower)
 	}
 }
+
+func TestSettingAnEmptyQueryOnAFreshTableChangesNothing(t *testing.T) {
+	tbl := queryTable(t)
+	before := tbl.Revision()
+
+	// The table already has no query. Saying so again is not a change
+	// anyone has to re-render for.
+	if err := tbl.SetQuery(Query{}); err != nil {
+		t.Fatalf("SetQuery: %v", err)
+	}
+	if tbl.Revision() != before {
+		t.Fatalf("Revision() = %d, want %d", tbl.Revision(), before)
+	}
+}

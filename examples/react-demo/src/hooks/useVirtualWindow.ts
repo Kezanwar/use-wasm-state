@@ -57,8 +57,17 @@ export function useVirtualWindow(rowCount: number, rowHeight: number, overscan =
   }, []);
 
   const visible = Math.max(1, Math.ceil(height / rowHeight));
-  const start = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
-  const count = Math.max(0, Math.min(rowCount - start, visible + overscan * 2));
+
+  // The window is snapped to a block rather than tracking the scroll
+  // exactly, so dragging the bar asks for the same window for a while
+  // instead of a brand new one every frame. That costs a little overscan
+  // and saves a request per frame, which in worker mode is a round trip
+  // per frame.
+  const block = Math.max(1, overscan);
+  const first = Math.max(0, Math.floor(scrollTop / rowHeight) - overscan);
+  const start = Math.min(Math.max(0, rowCount - 1), Math.floor(first / block) * block);
+  const span = (Math.ceil((visible + overscan * 2) / block) + 1) * block;
+  const count = Math.max(0, Math.min(rowCount - start, span));
 
   const scrollToRow = useCallback(
     (index: number) => {

@@ -10,8 +10,8 @@ Go, with only what React needs to render crossing back to JS.
 
 First structure: a table. Sort, filter and search 200k rows while you scroll.
 
-> **Status: early.** Not published yet. Sync mode only; worker mode and
-> shared tables are not built. See the build order below.
+> **Status: early.** Not published yet. Shared tables are not built yet.
+> See the build order below.
 
 ## Install
 
@@ -116,10 +116,36 @@ same revision the rows are.
 ## Sync mode
 
 The engine runs on the main thread, so a viewport is read during render and
-a mutation is visible on the next line. That is the only mode today. Worker
-mode will move the engine off the main thread behind the same API; until it
-lands, `mode: "worker"` reports a `not_implemented` error through `status`
-rather than failing quietly.
+a mutation is visible on the next line. That is the default.
+
+## Worker mode
+
+```tsx
+const { status, table } = useWasmTable(schema, { mode: "worker" });
+```
+
+The engine moves off the main thread. Reads stay synchronous, because the
+worker sends rows for every window on screen with each reply, so one round
+trip covers a whole user action. Mutations return Promises, because they
+really do cross a thread:
+
+```tsx
+await table.setCell(rowId, "price", 12.5);
+await table.sortBy("price", "desc");
+```
+
+The option types the result: `mode: "worker"` gives an `AsyncTableStore`,
+anything else a `TableStore`. Both satisfy `TableReader`, which is what
+`useTableView`, `useTableStats` and `useTableQuery` take, so a component
+that only reads does not care which it was handed.
+
+While a window is in flight the store answers with the nearest rows it
+already has, carrying their own `start`, so a grid draws them where they
+belong rather than blanking.
+
+The worker bundle is resolved with `new URL("./worker.js", import.meta.url)`,
+the same way `engine.wasm` is. Pass `workerUrl` where a CSP names an
+explicit `worker-src`.
 
 ## Serving engine.wasm
 
@@ -205,7 +231,7 @@ Nothing else does.
 5. ~~`SyncClient` + `TableStore` + `useWasmTable` / `useTableView`~~
 6. ~~Demo grid with 200k rows~~
 7. ~~Sort, filter, search in Go~~
-8. `WorkerClient` + worker mode
+8. ~~`WorkerClient` + worker mode~~
 9. Provider / shared tables
 10. Benchmarks against a plain JS implementation, docs
 

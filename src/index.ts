@@ -9,7 +9,7 @@
  */
 
 export { createEngine } from "./store/create-engine";
-export type { Engine, EngineOptions } from "./store/create-engine";
+export type { Engine, EngineOptions, Mode, StoreFor } from "./store/create-engine";
 
 export { defineSchema } from "./store/schema";
 export type {
@@ -22,7 +22,8 @@ export type {
   ValueOf,
 } from "./store/schema";
 
-export type { RowIds, TableStore, TableView } from "./store/table-store";
+export type { RowIds, TableReader, TableStore, TableView } from "./store/table-store";
+export type { AsyncTableStore } from "./store/async-table-store";
 
 export { WasmStateError } from "./engine/errors";
 export type { WasmStateErrorCode } from "./engine/errors";

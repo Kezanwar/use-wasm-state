@@ -31,6 +31,10 @@ const TYPES = {
 const ROUTES = [
   ["/use-wasm-state/", false],
   ["/badmime/", true],
+  // A strict CSP that names worker-src explicitly, so a blob: worker
+  // would be refused. The package resolves a real worker.js instead,
+  // which this allows; see e2e/subpath.spec.ts.
+  ["/csp/", false],
 ];
 
 createServer(async (req, res) => {
@@ -50,7 +54,16 @@ createServer(async (req, res) => {
       badMime && ext === ".wasm"
         ? "application/octet-stream"
         : (TYPES[ext] ?? "application/octet-stream");
-    res.writeHead(200, { "content-type": type }).end(body);
+    const headers = { "content-type": type };
+    if (prefix === "/csp/") {
+      // Only worker-src, which is the one thing this route is for: a page
+      // that allows workers from its own origin and nothing else. A blob:
+      // worker would be refused here, which is why the package resolves a
+      // real worker.js instead. Locking down the rest as well would just
+      // be testing Vite's output.
+      headers["content-security-policy"] = "worker-src 'self'";
+    }
+    res.writeHead(200, headers).end(body);
   } catch {
     res.writeHead(404).end(`not found: ${pathname}`);
   }

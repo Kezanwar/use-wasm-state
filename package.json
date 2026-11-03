@@ -35,6 +35,7 @@
       "require": "./dist/index.cjs"
     },
     "./engine.wasm": "./dist/engine.wasm",
+    "./worker.js": "./dist/worker.js",
     "./package.json": "./package.json"
   },
   "files": [

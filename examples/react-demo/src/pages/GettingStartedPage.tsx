@@ -46,6 +46,15 @@ useWasmTable(schema);
 // cannot resolve the asset.
 useWasmTable(schema, { wasmUrl: "https://cdn.example.com/engine.wasm" });`;
 
+const WORKER = `const { status, table } = useWasmTable(schema, { mode: "worker" });
+
+// Reads are the same, and still synchronous.
+const view = useTableView(table, start, 50);
+
+// Mutations cross a thread, so they return Promises.
+await table.setCell(rowId, "price", 12.5);
+await table.sortBy("price", "desc");`;
+
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
     <Card>
@@ -88,6 +97,17 @@ export function GettingStartedPage() {
           reports a <code>not_implemented</code> error through <code>status</code> rather than
           failing quietly.
         </p>
+      </Section>
+
+      <Section title="Worker mode">
+        <p className="text-muted-foreground text-sm">
+          The engine moves off the main thread. Reads stay synchronous, because the worker sends
+          rows for every window on screen with each reply, so one round trip covers a whole user
+          action. Mutations return Promises, because they really do cross a thread. The option types
+          the result, and both stores satisfy <code>TableReader</code>, so a component that only
+          reads does not care which it was handed.
+        </p>
+        <CodeBlock code={WORKER} label="tsx" />
       </Section>
 
       <Section title="Serving engine.wasm">

@@ -2,7 +2,17 @@ import { copyFileSync, mkdirSync } from "node:fs";
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  entry: ["src/index.ts"],
+  // Two bundles: the package, and the worker. The worker is its own entry
+  // because the main one imports React, which a worker has no business
+  // loading. Consumers never import it; createEngine resolves it with
+  // new URL("./worker.js", import.meta.url).
+  entry: ["src/index.ts", "src/worker.ts"],
+  // Each entry self-contained. Splitting would have worker.js import a
+  // shared chunk, and a bundler copying worker.js as an asset URL copies
+  // only that one file: the worker then 404s on its own chunk, in the
+  // production build only. The engine is duplicated instead, which is a
+  // few kB against a mode that does not work.
+  splitting: false,
   format: ["esm", "cjs"],
   dts: true,
   clean: true,

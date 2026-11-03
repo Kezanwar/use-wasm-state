@@ -1,17 +1,7 @@
 import { expect, test, type Page } from "@playwright/test";
+import { ready, rowCount } from "./helpers";
 
 /** Sort, filter and search, against 200k real rows in a browser. */
-
-async function ready(page: Page) {
-  await page.goto("/#examples");
-  await expect(page.getByTestId("row-count")).toHaveText("200,000", { timeout: 60_000 });
-}
-
-const rowCount = (page: Page) =>
-  page
-    .getByTestId("row-count")
-    .textContent()
-    .then((text) => Number((text ?? "0").replace(/\D/g, "")));
 
 /** The price column, as a number, for the first n rendered rows. */
 async function prices(page: Page, n: number) {

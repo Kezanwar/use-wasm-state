@@ -151,21 +151,18 @@ describe("useWasmTable", () => {
   });
 
   it("reports an option that is not built yet through status, not a throw", async () => {
+    // shared is the only one left: worker mode is built, and jsdom has no
+    // Worker, so it is covered by the browser suite instead.
     function Unsupported({ options }: { options: Record<string, unknown> }) {
       const { status, error } = useWasmTable(schema, { wasmUrl: ENGINE_URL, ...options });
       return <p data-testid="state">{status === "error" ? error.message : status}</p>;
     }
 
-    for (const [label, options] of [
-      ["shared", { shared: "orders" }],
-      ["worker", { mode: "worker" }],
-    ] as const) {
-      const view = render(<Unsupported options={options} />);
-      await waitFor(() =>
-        expect(screen.getByTestId("state").textContent, label).toMatch(/not implemented yet/)
-      );
-      view.unmount();
-    }
+    const view = render(<Unsupported options={{ shared: "orders" }} />);
+    await waitFor(() =>
+      expect(screen.getByTestId("state").textContent).toMatch(/not implemented yet/)
+    );
+    view.unmount();
   });
 
   it("gives that error the not_implemented code", async () => {
