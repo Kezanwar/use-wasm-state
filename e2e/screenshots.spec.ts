@@ -5,7 +5,7 @@ import { expect, test, type Page } from "@playwright/test";
  * artifacts to look at when something reads wrong but nothing fails.
  */
 
-const TABS = ["start", "examples", "api"] as const;
+const TABS = ["start", "examples", "benchmarks", "api"] as const;
 
 async function setTheme(page: Page, theme: "dark" | "light") {
   await page.addInitScript((value) => {

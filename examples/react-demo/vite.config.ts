@@ -1,3 +1,4 @@
+import { statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
@@ -10,6 +11,12 @@ export default defineConfig({
   // and survives the repo being renamed.
   base: "./",
   plugins: [react(), tailwindcss()],
+  // Read from the built module, so a size on the page is never typed.
+  define: {
+    __DATAGRID_WASM_BYTES__: JSON.stringify(
+      statSync(fileURLToPath(new URL("../../src/datagrid/datagrid.wasm", import.meta.url))).size
+    ),
+  },
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),

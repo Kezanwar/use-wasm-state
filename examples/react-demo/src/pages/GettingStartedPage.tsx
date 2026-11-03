@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { Go, Js, Name, Wasm } from "@/components/Term";
 import { CodeBlock } from "@/components/CodeBlock";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { formatKB } from "@/bench/format";
 
 const INSTALL = `npm install use-wasm-state`;
 
@@ -113,7 +114,11 @@ export function GettingStartedPage() {
           state run in <Wasm>wasm</Wasm> too. So <Go /> owns the rows, the string dictionaries and
           the row order; React owns the scroll position and the selection. A counter on the grid
           bumps on every mutation, <code>useSyncExternalStore</code> watches that counter, and each
-          component reads back only the rows it is showing.
+          component reads back only the rows it is showing. The{" "}
+          <a href="#benchmarks" className="text-foreground underline underline-offset-2">
+            benchmarks
+          </a>{" "}
+          show where that wins against plain and tuned JS, and where it does not.
         </p>
         <CodeBlock code={VIEWPORT} label="tsx" />
       </Section>
@@ -131,7 +136,12 @@ export function GettingStartedPage() {
           <code>useWasmDataGridAsync</code> moves the engine off the main thread. Reads stay
           synchronous, because the worker sends rows for every window on screen with each reply, so
           one round trip covers a whole user action. Mutations return Promises, because they really
-          do cross a thread.
+          do cross a thread. A sort that stalls the page on the main thread leaves it painting here,
+          which the{" "}
+          <a href="#benchmarks" className="text-foreground underline underline-offset-2">
+            benchmarks
+          </a>{" "}
+          show side by side.
         </p>
         <CodeBlock code={WORKER} label="tsx" />
         <p className="text-muted-foreground text-sm">
@@ -159,9 +169,9 @@ export function GettingStartedPage() {
 
       <Section title="Serving the engine">
         <p className="text-muted-foreground text-sm">
-          The datagrid's engine is <code>datagrid.wasm</code>, a 55 kB module that imports nothing,
-          and its worker is <code>datagrid.worker.js</code>. Both are resolved with{" "}
-          <code>new URL("./…", import.meta.url)</code>, which <Name>Vite</Name> and{" "}
+          The datagrid's engine is <code>datagrid.wasm</code>, a {formatKB(__DATAGRID_WASM_BYTES__)}{" "}
+          module that imports nothing, and its worker is <code>datagrid.worker.js</code>. Both are
+          resolved with <code>new URL("./…", import.meta.url)</code>, which <Name>Vite</Name> and{" "}
           <Name>webpack 5</Name> both understand. The <Name>CJS</Name> build ships a shim for{" "}
           <code>import.meta.url</code>; if a bundler still cannot resolve the assets, pass the URLs.
         </p>

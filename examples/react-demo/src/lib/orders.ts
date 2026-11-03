@@ -92,8 +92,9 @@ export function generateOrders(count: number, from = 0): OrderColumns {
   const status = new Array<string>(count);
   const country = new Array<string>(count);
 
-  // Days since epoch, over roughly the last three years.
-  const today = Math.floor(Date.now() / 86_400_000);
+  // Days since epoch, over the three years to a fixed day rather than to
+  // today, so the data is identical on every machine and every day.
+  const today = 20_395;
 
   for (let i = 0; i < count; i++) {
     id[i] = from + i + 1;

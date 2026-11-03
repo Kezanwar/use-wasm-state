@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -79,10 +80,11 @@ describe.skipIf(!built)("dist", () => {
       [".", "index"],
       ["./datagrid", "datagrid"],
     ] as const) {
+      // Types per format: one `types` for both would hand a CommonJS
+      // consumer ESM declarations, which node16 resolution then refuses.
       expect(pkg.exports[path], path).toEqual({
-        types: `./dist/${name}.d.ts`,
-        import: `./dist/${name}.js`,
-        require: `./dist/${name}.cjs`,
+        import: { types: `./dist/${name}.d.ts`, default: `./dist/${name}.js` },
+        require: { types: `./dist/${name}.d.cts`, default: `./dist/${name}.cjs` },
       });
     }
     // moduleResolution "node" ignores exports; this is how it finds the
@@ -153,6 +155,33 @@ describe.skipIf(!built)("dist", () => {
     for (const name of ENTRIES) {
       expect(read(`${name}.cjs`), name).not.toMatch(/\bimport\s*\.\s*meta\b/);
     }
+  });
+
+  it("packs exactly what a consumer needs", () => {
+    // No tests, no sources, no maps, and no CJS worker: the worker is loaded
+    // by URL as a module, so its CJS twin could never be used.
+    const [packed] = JSON.parse(
+      execFileSync("npm", ["pack", "--dry-run", "--json"], { cwd: root, stdio: "pipe" }).toString()
+    );
+    const files = (packed.files as { path: string }[]).map((f) => f.path).sort();
+    expect(files).toEqual(
+      [
+        "LICENSE",
+        "README.md",
+        "llm.md",
+        "package.json",
+        "dist/datagrid.cjs",
+        "dist/datagrid.d.cts",
+        "dist/datagrid.d.ts",
+        "dist/datagrid.js",
+        "dist/datagrid.wasm",
+        "dist/datagrid.worker.js",
+        "dist/index.cjs",
+        "dist/index.d.cts",
+        "dist/index.d.ts",
+        "dist/index.js",
+      ].sort()
+    );
   });
 
   it("has no runtime dependencies", () => {

@@ -19,9 +19,14 @@ export default defineConfig({
   // WasmStateError, are keyed on global symbols. See src/core/context.ts.
   splitting: false,
   format: ["esm", "cjs"],
-  dts: true,
+  // Types for what a consumer imports. The worker is an asset loaded by URL,
+  // so it gets none; its CJS twin is built and left out of the package.
+  dts: { entry: { index: "src/index.ts", datagrid: "src/datagrid/index.ts" } },
   clean: true,
-  sourcemap: true,
+  // No source maps in the package. Nothing is minified, so a stack trace
+  // already reads as the source, and maps would more than double what every
+  // install downloads.
+  sourcemap: false,
   // Deliberately off. tsup's treeshake pass is rollup, which strips
   // module-level directives and drops the "use client" banner below with a
   // warning. The package is tiny and marked sideEffects:false, so consumer

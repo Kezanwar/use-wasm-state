@@ -463,7 +463,7 @@ export function ApiPage() {
           <Entry name="RowIds" kind="type" signature={GRID.RowIds}>
             <p>
               The ids an insert produced. Always a contiguous run, so it is described rather than
-              materialised: an array of 200,000 numbers is 1.6 MB almost every caller throws away.
+              materialised: an array of every id is memory almost every caller throws away.
             </p>
           </Entry>
 

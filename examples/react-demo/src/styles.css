@@ -36,6 +36,10 @@
   --wasm-soft: oklch(0.96 0.03 285);
   /* Go's cyan-blue, darkened enough to read on white. */
   --go: oklch(0.58 0.12 222);
+  /* Benchmark series. Validated as a pair, light and dark, for CVD and
+     contrast: categorical slots 1 and 2. */
+  --series-wasm: #2a78d6;
+  --series-tuned: #eb6834;
   /* Inline code in prose. Deliberately a redder orange than --js, which is
      a gold, so the two never read as the same thing. The chip around it is
      warm rather than neutral, so it sits with the text and not with the
@@ -81,6 +85,8 @@
   --wasm: oklch(0.72 0.17 288);
   --wasm-soft: oklch(0.3 0.06 288);
   --go: oklch(0.78 0.11 218);
+  --series-wasm: #3987e5;
+  --series-tuned: #d95926;
   --code: oklch(0.76 0.13 50);
   --code-bg: oklch(0.25 0.018 50);
   --code-border: oklch(0.37 0.03 50);
@@ -123,6 +129,8 @@
   --color-wasm: var(--wasm);
   --color-wasm-soft: var(--wasm-soft);
   --color-go: var(--go);
+  --color-series-wasm: var(--series-wasm);
+  --color-series-tuned: var(--series-tuned);
   --color-code: var(--code);
 
   --radius-sm: calc(var(--radius) - 4px);

@@ -254,6 +254,22 @@ engine is fetched from, keyed by its name, read once on mount:
 `wrong-type`, `row-count`, `bad-schema`, `bad-argument`, `disposed`,
 `schema_mismatch`, `no_provider`, `engine`.
 
+## When it pays, and when it does not
+
+Measured against plain JS on 200k rows (`benchmarks.json`, and the
+Benchmarks tab on the docs site):
+
+- **Use it for sorting, filtering and searching a large dataset.** Sorts
+  are where the engine leads by the widest margin, including the re-sort an
+  edit costs while a sort is active.
+- **Tuned JS is close on filters and search.** The engine's edge there is
+  smaller, and in a browser tuned JS is sometimes ahead.
+- **Plain JS is faster at loading, single edits, deletes and reading a
+  window** of rows it already holds as objects. For a small or append-only
+  list, use `useState`.
+- **The main-thread win is frames.** A long JS sort blocks the page for many
+  frames; in a worker, the page never stops painting.
+
 ## Performance rules
 
 - **Sort, filter and search belong in the query**, not in JS. Reading rows

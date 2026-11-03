@@ -7,6 +7,7 @@ import { resolve } from "node:path";
 const tabs = [
   ["start", "Install"],
   ["examples", "Basic"],
+  ["benchmarks", "Frames"],
   ["api", "Hooks"],
 ] as const;
 

@@ -1,7 +1,7 @@
 {
   "name": "use-wasm-state",
   "version": "0.0.0",
-  "description": "React state that lives in a WebAssembly engine written in Go. Specialised data structures whose operations run in wasm; only what React renders crosses to JS.",
+  "description": "React state that lives in a WebAssembly engine written in Go. A datagrid whose sort, filter and search run in wasm, on the main thread or in a worker; only the rows on screen cross to JS.",
   "keywords": [
     "react",
     "wasm",
@@ -19,7 +19,7 @@
     "type": "git",
     "url": "git+https://github.com/Kezanwar/use-wasm-state.git"
   },
-  "homepage": "https://github.com/Kezanwar/use-wasm-state#readme",
+  "homepage": "https://kezanwar.github.io/use-wasm-state/",
   "bugs": {
     "url": "https://github.com/Kezanwar/use-wasm-state/issues"
   },
@@ -37,14 +37,24 @@
   },
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "import": "./dist/index.js",
-      "require": "./dist/index.cjs"
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
     },
     "./datagrid": {
-      "types": "./dist/datagrid.d.ts",
-      "import": "./dist/datagrid.js",
-      "require": "./dist/datagrid.cjs"
+      "import": {
+        "types": "./dist/datagrid.d.ts",
+        "default": "./dist/datagrid.js"
+      },
+      "require": {
+        "types": "./dist/datagrid.d.cts",
+        "default": "./dist/datagrid.cjs"
+      }
     },
     "./datagrid.wasm": "./dist/datagrid.wasm",
     "./datagrid.worker.js": "./dist/datagrid.worker.js",
@@ -52,6 +62,7 @@
   },
   "files": [
     "dist",
+    "!dist/datagrid.worker.cjs",
     "llm.md"
   ],
   "engines": {
@@ -70,7 +81,8 @@
     "test:browser": "playwright test",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "prepublishOnly": "pnpm build && pnpm test"
+    "prepublishOnly": "pnpm build && pnpm test",
+    "bench": "node --expose-gc scripts/benchmark.mjs"
   },
   "peerDependencies": {
     "react": ">=18"

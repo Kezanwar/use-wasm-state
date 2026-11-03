@@ -10,7 +10,7 @@ React needs to render crossing back to JS.
 
 First kind: a datagrid. Sort, filter and search 200k rows while you scroll.
 
-> **Status: early.** Not published yet. See the build order below.
+> **Status: early.** Not published yet.
 
 ## Install
 
@@ -186,10 +186,55 @@ both can be nested. A definition with no provider of its mode above it is
 an error through `status`, code `no_provider`; two different definitions
 under one key are `schema_mismatch`, unless their columns are identical.
 
+## Performance
+
+<!-- benchmarks:start -->
+<!-- Generated from benchmarks.json by `pnpm bench`. Edit neither by hand. -->
+
+Median of 15 runs over 200,000 rows, on Apple M2 Pro (10 cores, 16 GB), darwin 24.6.0 arm64, Node v22.23.1, 2026-11-03. Fastest in bold.
+
+| | Typical JS | Tuned JS | Wasm |
+| --- | ---: | ---: | ---: |
+| Load | 28.2 ms | **14.8 ms** | 54.1 ms |
+| Sort f64 | 109 ms | 51.8 ms | **7.05 ms** |
+| Sort i32 | 59.4 ms | 44.4 ms | **2.39 ms** |
+| Sort string | 263 ms | 59.2 ms | **2.61 ms** |
+| Sort, two keys | 284 ms | 73.1 ms | **7.81 ms** |
+| Filter > | 9.28 ms | **2.28 ms** | 2.47 ms |
+| Filter between | 8.88 ms | 3.01 ms | **1.96 ms** |
+| Filter string = | 9.07 ms | 2.54 ms | **1.74 ms** |
+| Filter string in | 10.6 ms | 3.13 ms | **2.65 ms** |
+| Filter contains | 17.0 ms | 2.78 ms | **1.95 ms** |
+| Search | 26.4 ms | 3.86 ms | **3.41 ms** |
+| Filter + search + sort | 74.4 ms | 23.8 ms | **5.18 ms** |
+| setCell | 183 ns | **111 ns** | 194 ns |
+| setCell, sorted | 157 ms | 52.5 ms | **6.93 ms** |
+| view(50) | **1.58 µs** | 11.4 µs | 13.6 µs |
+| Delete 1,000 rows | 5.46 ms | **376 µs** | 1.62 ms |
+| JS memory after load | 26.1 MB | 8.4 MB | 2.3 MB |
+| Wasm memory after load |  |  | 33.6 MB |
+
+`datagrid.wasm` is 55,173 bytes. The [Benchmarks tab](https://kezanwar.github.io/use-wasm-state/#benchmarks) runs the same benchmark in your browser, and adds what each costs in frames.
+<!-- benchmarks:end -->
+
+Wasm's lead is sorting, including the re-sort an edit costs while a sort
+is active: the engine radix-sorts integer keys where JS calls a comparator
+for every pair. On filters and search, tuned JS, which decides a string
+filter once per distinct value the way the engine does, is close and
+sometimes ahead. Plain JS wins whatever does not have to cross into wasm:
+loading, a single edit, a delete, and reading rows it already holds as
+objects. On the main thread the difference is frames as much as
+milliseconds; in a worker the page keeps painting through all of it.
+
+An edit is cheap until a sort or filter is active, and then it costs a row
+order rebuild, which is O(rows) however small the edit was. That is the
+honest price of the design: the order is the output of a stored query, and
+one changed cell can move a row anywhere in it.
+
 ## Serving the engine
 
-The datagrid's engine is `datagrid.wasm`, a 55 kB module that imports
-nothing, and its worker is `datagrid.worker.js`. Both are resolved beside
+The datagrid's engine is `datagrid.wasm`, a module that imports nothing,
+and its worker is `datagrid.worker.js`. Both are resolved beside
 the datagrid bundle with `new URL("./…", import.meta.url)`, which Vite and
 webpack 5 both understand and which keeps the streaming compile.
 
@@ -219,8 +264,9 @@ src/       the npm package. `core` is the root entry, what every kind of
            plumbing. `datagrid` is the first kind, with its engine.
 test/      vitest.
 e2e/       Playwright, for the things only a browser can run.
-examples/  the Vite docs site: getting started, live examples, API.
-scripts/   build and audit the .wasm.
+examples/  the Vite docs site: getting started, examples, benchmarks, API.
+           The benchmark's baselines and runner live in its src/bench.
+scripts/   build and audit the .wasm, run the benchmark.
 ```
 
 `src/datagrid/datagrid.wasm` is committed, so the tests and the demo run without
@@ -229,33 +275,10 @@ TinyGo installed. Rebuild it only when `engine/` changes.
 The engine core is plain Go with no wasm in it, so `pnpm test:go` needs no
 TinyGo either.
 
-Measured in Node against the committed module, 200k rows of i32, f64
-and dictionary-encoded string:
-
-| | |
-| --- | --- |
-| `insertColumns`, the whole dataset in one call | 15ms |
-| `view(start, 50)`, rows decoded into JS | 6.5us |
-| `setCell` | 0.3us |
-| `setCell` with a sort active | 4.4ms |
-| `sortBy` on an f64 column | 4.3ms |
-| `search` | 1.5ms |
-
-`pnpm exec node scripts/bench-engine.mjs` reproduces them.
-
-An edit is cheap until a sort or filter is active, and then it costs a row
-order rebuild, which is O(rows) however small the edit was. That is the
-honest price of the design: the order is the output of a stored query, and
-one changed cell can move a row anywhere in it.
-
-### Memory
-
-Built with TinyGo's `-gc=precise`, not this target's default `leaking`
-collector, so a long-lived grid gives memory back. Over 400k rows arriving
-in batches, precise holds at 16MB of linear memory where leaking reaches
-32MB, and it costs 1.4x on the one bulk insert. `-gc=conservative` holds the
-same memory but takes a 200k-row insert to 1,700ms. The reasoning is in
-`scripts/build-wasm.mjs`; re-measure before changing it.
+The module is built with TinyGo's `-gc=precise`, not this target's default
+`leaking` collector, so a long-lived grid gives memory back. The
+measurements behind that choice are in `scripts/build-wasm.mjs`; re-measure
+before changing it.
 
 ## Scripts
 
@@ -269,6 +292,7 @@ same memory but takes a 200k-row insert to 1,700ms. The reasoning is in
 | `pnpm build` | tsup -> dist |
 | `pnpm build:wasm` | TinyGo -> `src/datagrid/datagrid.wasm`, then audit it |
 | `pnpm inspect:wasm` | list the engine's imports and exports |
+| `pnpm bench` | measure, write `benchmarks.json` and the README's figures |
 
 `build:wasm` needs TinyGo: `brew tap tinygo-org/tools && brew install tinygo`.
 Nothing else does.
@@ -276,7 +300,7 @@ Nothing else does.
 ## Build order
 
 1. ~~Scaffold workspace, tooling, CI~~
-2. ~~`internal/wasm` loader and memory helpers, with tests~~
+2. ~~`core/wasm` loader and memory helpers, with tests~~
 3. ~~Go `datagrid` package: schema, insert, view~~
 4. ~~ABI in `cmd/datagrid`, build, `abi.test.ts`~~
 5. ~~`SyncClient`, the store and the creation and read hooks~~
@@ -284,7 +308,7 @@ Nothing else does.
 7. ~~Sort, filter, search in Go~~
 8. ~~`WorkerClient` + worker mode~~
 9. ~~Providers and shared grids~~
-10. Benchmarks against a plain JS implementation, docs
+10. ~~Benchmarks against plain JS, and release readiness~~
 
 ## Licence
 

@@ -27,7 +27,7 @@
  *
  * The engine is built to allocate almost nothing in steady state (see
  * "Memory model" in the architecture notes), so the collector should have
- * little to do between loads. Re-measure with scripts/bench-engine.mjs
+ * little to do between loads. Re-measure with `pnpm bench`
  * before changing this.
  */
 import { spawnSync } from "node:child_process";

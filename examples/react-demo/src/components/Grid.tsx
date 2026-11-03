@@ -64,8 +64,16 @@ export interface GridProps {
   onSort: (run: () => unknown) => void;
 }
 
-export function Grid({ grid, rowCount, selection, onSelectionChange, onEdit, onSort }: GridProps) {
-  const window = useVirtualWindow(rowCount, ROW_HEIGHT);
+export function Grid({
+  grid,
+  rowCount,
+  overscan,
+  selection,
+  onSelectionChange,
+  onEdit,
+  onSort,
+}: GridProps) {
+  const window = useVirtualWindow(rowCount, ROW_HEIGHT, overscan);
   const view = useDataGridView(grid, window.start, window.count);
   const query = useDataGridQuery(grid);
 
