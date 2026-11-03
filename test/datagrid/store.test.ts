@@ -360,6 +360,70 @@ describe("disposal", () => {
   });
 });
 
+describe("appending", () => {
+  it("adds rows one at a time through insertRows and insertColumns", async () => {
+    const { grid } = await store();
+    grid.insertColumns({
+      id: [0, 1, 2],
+      price: [0.5, 1.5, 2.5],
+      status: ["new", "shipped", "new"],
+    });
+
+    expect(grid.insertRows([ROW(3)]).first).toBe(3);
+    expect(grid.insertColumns({ id: [4], price: [4.5], status: ["held"] }).first).toBe(4);
+    expect(grid.insertRows([ROW(5), ROW(6)]).first).toBe(5);
+
+    expect(grid.rowCount).toBe(7);
+    expect(grid.view(3, 4).rows()).toEqual([
+      ROW(3),
+      { id: 4, price: 4.5, status: "held" },
+      ROW(5),
+      ROW(6),
+    ]);
+  });
+
+  it("places an append where the active query puts it", async () => {
+    const { grid } = await store();
+    grid.insertRows([ROW(1), ROW(2), ROW(3)]);
+    grid.setQuery({ sort: [{ column: "price", direction: "desc" }] });
+
+    grid.insertRows([ROW(9)]);
+    expect(
+      grid
+        .view(0, 4)
+        .rows()
+        .map((row) => row.id)
+    ).toEqual([9, 3, 2, 1]);
+
+    grid.setQuery({ filters: [{ column: "status", op: "eq", value: "new" }] });
+    grid.insertRows([ROW(10), ROW(11)]);
+    expect(
+      grid
+        .view(0, 10)
+        .rows()
+        .map((row) => row.id)
+    ).toEqual([2, 10]);
+  });
+
+  it("leaves the grid and its listeners untouched when an append is rejected", async () => {
+    const { grid } = await store();
+    grid.insertRows([ROW(0), ROW(1)]);
+    const revision = grid.revision;
+    const listener = vi.fn();
+    grid.subscribe(listener);
+
+    expect(() => grid.insertColumns({ id: [7, 8], price: [1], status: ["x", "y"] })).toThrow(
+      WasmStateError
+    );
+
+    expect(grid.totalRows).toBe(2);
+    expect(grid.revision).toBe(revision);
+    expect(listener).not.toHaveBeenCalled();
+    expect(grid.view(0, 5).rows()).toEqual([ROW(0), ROW(1)]);
+    expect(grid.insertRows([ROW(2)]).first).toBe(2);
+  });
+});
+
 describe("at scale", () => {
   it("loads 200k rows through insertColumns and reads windows", async () => {
     const { grid } = await store();
@@ -385,5 +449,12 @@ describe("at scale", () => {
       expect(view.get(0, "id")).toBe(start);
       expect(view.get(0, "status")).toBe(labels[start % labels.length]);
     }
+
+    // An append after the load costs a row, not the dataset.
+    grid.insertRows([{ id: -1, price: 0, status: "new" }]);
+    const started = performance.now();
+    for (let i = 0; i < 1000; i++) grid.insertRows([{ id: n + i, price: 1, status: "paid" }]);
+    expect((performance.now() - started) / 1000).toBeLessThan(0.2);
+    expect(grid.view(n + 1000, 1).row(0)).toEqual({ id: n + 999, price: 1, status: "paid" });
   });
 });

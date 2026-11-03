@@ -21,6 +21,8 @@ export interface Instance {
   store: Store;
   /** Bytes of wasm linear memory, for an implementation that has any. */
   linearMemory?(): number;
+  /** Bytes the engine's heap holds after a collection: its live state. */
+  liveMemory?(): number;
   dispose(): void;
 }
 
@@ -45,8 +47,10 @@ export interface OperationResult {
 export interface MemoryResult {
   /** Bytes of JS memory the loaded grid holds, where the runtime can say. */
   js: number | null;
-  /** Bytes of wasm linear memory, for the engine. */
+  /** Bytes of wasm linear memory reserved, for the engine. */
   wasm: number | null;
+  /** Of that, the bytes the engine's heap still holds after a collection. */
+  wasmLive?: number | null;
 }
 
 export interface Results {
@@ -311,6 +315,7 @@ async function measureMemory(
   const result = {
     js: measure ? after - before : null,
     wasm: instance.linearMemory?.() ?? null,
+    wasmLive: instance.liveMemory?.() ?? null,
   };
   instance.dispose();
   return result;

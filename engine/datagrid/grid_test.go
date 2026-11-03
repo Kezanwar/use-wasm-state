@@ -595,7 +595,7 @@ func TestSetCellSkipsTheOrderRebuild(t *testing.T) {
 	}
 }
 
-func TestInsertAndDeleteStillRebuildTheOrder(t *testing.T) {
+func TestInsertAppendsToTheOrderOrRebuildsIt(t *testing.T) {
 	t.Run("delete", func(t *testing.T) {
 		tbl := fourRows(t)
 		tbl.order[0] = 99
@@ -607,7 +607,7 @@ func TestInsertAndDeleteStillRebuildTheOrder(t *testing.T) {
 		}
 	})
 
-	t.Run("insert", func(t *testing.T) {
+	t.Run("insert with no query appends", func(t *testing.T) {
 		tbl := fourRows(t)
 		tbl.order[0] = 99
 		if _, err := tbl.InsertColumns([]ColumnData{
@@ -615,8 +615,25 @@ func TestInsertAndDeleteStillRebuildTheOrder(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("InsertColumns: %v", err)
 		}
-		if !equalI32(tbl.order, []int32{0, 1, 2, 3, 4}) {
-			t.Fatalf("order = %v, want [0 1 2 3 4]: an insert must rebuild", tbl.order)
+		// The scribble survives: the new row was appended, nothing rebuilt.
+		if !equalI32(tbl.order, []int32{99, 1, 2, 3, 4}) {
+			t.Fatalf("order = %v, want [99 1 2 3 4]: an insert with no query must append", tbl.order)
+		}
+	})
+
+	t.Run("insert under a query rebuilds", func(t *testing.T) {
+		tbl := fourRows(t)
+		if err := tbl.SetQuery(Query{Sort: []SortKey{{Col: 0, Desc: true}}}); err != nil {
+			t.Fatalf("SetQuery: %v", err)
+		}
+		tbl.order[0] = 99
+		if _, err := tbl.InsertColumns([]ColumnData{
+			{I32: []int32{50}}, {F64: []float64{5.5}}, {Strings: []string{"new"}},
+		}); err != nil {
+			t.Fatalf("InsertColumns: %v", err)
+		}
+		if !equalI32(tbl.order, []int32{4, 3, 2, 1, 0}) {
+			t.Fatalf("order = %v, want [4 3 2 1 0]: an insert under a sort must rebuild", tbl.order)
 		}
 	})
 
@@ -685,5 +702,90 @@ func TestInsertGrowsEachColumnOnce(t *testing.T) {
 	}
 	if got := cap(tbl.cols[2].i32); got != n {
 		t.Errorf("string column capacity = %d, want exactly %d", got, n)
+	}
+}
+
+/* ------------------------------------------------------------------ */
+/* Reserve and Commit                                                  */
+/* ------------------------------------------------------------------ */
+
+func TestReserveThenCommitAppendsWhatWasWritten(t *testing.T) {
+	tbl := fourRows(t)
+	slots, err := tbl.Reserve(2)
+	if err != nil {
+		t.Fatalf("Reserve: %v", err)
+	}
+	copy(slots[0].I32, []int32{50, 60})
+	copy(slots[1].F64, []float64{5.5, 6.5})
+
+	first, err := tbl.Commit(2, []ColumnData{{}, {}, {Strings: []string{"held", "lost"}}})
+	if err != nil || first != 4 {
+		t.Fatalf("Commit = %d, %v; want 4, nil", first, err)
+	}
+	if !equalI32(tbl.cols[0].i32[4:], []int32{50, 60}) || tbl.cols[1].f64[5] != 6.5 {
+		t.Fatalf("columns = %v, %v", tbl.cols[0].i32, tbl.cols[1].f64)
+	}
+	if got := tbl.cols[2].dict.values[tbl.cols[2].i32[5]]; got != "lost" {
+		t.Fatalf("string = %q, want lost", got)
+	}
+}
+
+func TestRejectedCommitLeavesTheGridUntouched(t *testing.T) {
+	cases := []struct {
+		name string
+		n    int32
+		text []ColumnData
+	}{
+		{"more rows than reserved", 3, []ColumnData{{}, {}, {Strings: []string{"a", "b", "c"}}}},
+		{"strings short of the rows", 2, []ColumnData{{}, {}, {Strings: []string{"a"}}}},
+		{"offsets past the blob", 2, []ColumnData{{}, {}, {Blob: []byte("ab"), Offsets: []int32{0, 1, 9}}}},
+		{"offsets running backwards", 2, []ColumnData{{}, {}, {Blob: []byte("ab"), Offsets: []int32{0, 2, 1}}}},
+		{"wrong column count", 2, []ColumnData{{}, {}}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			tbl := fourRows(t)
+			rev, dict := tbl.Revision(), tbl.cols[2].dict.len()
+			if _, err := tbl.Reserve(2); err != nil {
+				t.Fatalf("Reserve: %v", err)
+			}
+			if _, err := tbl.Commit(tc.n, tc.text); err == nil {
+				t.Fatal("expected an error")
+			}
+			if tbl.TotalRows() != 4 || tbl.RowCount() != 4 || tbl.Revision() != rev || tbl.cols[2].dict.len() != dict {
+				t.Fatalf("grid changed: rows %d, live %d, revision %d, dictionary %d",
+					tbl.TotalRows(), tbl.RowCount(), tbl.Revision(), tbl.cols[2].dict.len())
+			}
+		})
+	}
+}
+
+func TestAppendsAreAmortised(t *testing.T) {
+	tbl := fourRows(t)
+	grew := 0
+	for i := 0; i < 10_000; i++ {
+		before := cap(tbl.cols[0].i32)
+		if _, err := tbl.InsertColumns([]ColumnData{
+			{I32: []int32{int32(i)}}, {F64: []float64{1}}, {Strings: []string{"new"}},
+		}); err != nil {
+			t.Fatalf("InsertColumns: %v", err)
+		}
+		if cap(tbl.cols[0].i32) != before {
+			grew++
+		}
+	}
+	// Doubling from 4 to past 10,004 rows is 12 steps; exact sizing was 10,000.
+	if grew > 12 {
+		t.Fatalf("columns reallocated %d times over 10,000 single-row appends", grew)
+	}
+	if tbl.RowCount() != 10_004 || tbl.order[10_003] != 10_003 {
+		t.Fatalf("order ends wrong: %d rows", tbl.RowCount())
+	}
+
+	// Once capacity is there, an append allocates nothing at all.
+	row := []ColumnData{{I32: []int32{1}}, {F64: []float64{1}}, {Strings: []string{"new"}}}
+	tbl.InsertColumns(row)
+	if allocs := testing.AllocsPerRun(100, func() { tbl.InsertColumns(row) }); allocs != 0 {
+		t.Fatalf("a single-row append allocated %v times", allocs)
 	}
 }

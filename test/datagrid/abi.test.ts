@@ -253,25 +253,94 @@ describe("insertColumns", () => {
     ).toBe(Status.BadArgument);
   });
 
-  it("rejects a misaligned data pointer with BadArgument", async () => {
-    const e = await newEngine();
-    const h = createGrid(e, SCHEMA);
+  it("leaves the grid untouched when an append is rejected", async () => {
+    const { e, h } = await seeded(10);
+    const revision = e.revision(h);
+    const before = readView(e, h, 0, 10, SCHEMA)!;
 
-    // Descriptors pointing one byte off an aligned offset. Reinterpreting
-    // that as float64s would be undefined behaviour, so it has to be
-    // refused rather than read.
+    // Strings short of the rows: rejected after the reserve, at the commit.
     const status = withInput(
       e,
-      [bytesIn(new Uint8Array(64)), u32In(new Uint32Array(SCHEMA.length * 4))],
-      ([data, descPtr]) => {
-        const descs = new Uint32Array(e.memory.buffer, descPtr.ptr, SCHEMA.length * 4);
-        descs.set([data.ptr + 1, 1, 0, 1], 0);
-        descs.set([data.ptr + 1, 1, 0, 1], 4);
-        descs.set([data.ptr + 1, 1, data.ptr, 1], 8);
-        return e.insertColumns(h, descPtr.ptr, SCHEMA.length);
+      [u32In(new Uint32Array(3)), u32In(new Uint32Array(12))],
+      ([out, descs]) => {
+        expect(e.reserveRows(h, 2, out.ptr, 3)).toBe(Status.OK);
+        return e.commitRows(h, 2, descs.ptr, 3);
+      }
+    );
+    expect(status).toBe(Status.RowCount);
+
+    expect(e.totalRows(h)).toBe(10);
+    expect(e.rowCount(h)).toBe(10);
+    expect(e.revision(h)).toBe(revision);
+    expect(e.dictLen(h, 2)).toBe(LABELS.length);
+    const after = readView(e, h, 0, 10, SCHEMA)!;
+    expect([...after.ids]).toEqual([...before.ids]);
+    expect([...after.columns[0]!]).toEqual([...before.columns[0]!]);
+
+    // And the next append lands where it should.
+    expect(
+      insertColumns(e, h, [
+        { type: ColumnType.I32, values: [7] },
+        { type: ColumnType.F64, values: [7.5] },
+        { type: ColumnType.String, values: ["fresh"] },
+      ])
+    ).toBe(10);
+    expect(readDictSince(e, h, 2, LABELS.length)).toEqual(["fresh"]);
+  });
+
+  it("commits only the count it reserved", async () => {
+    const e = await newEngine();
+    const h = createGrid(e, [{ name: "n", type: ColumnType.I32 }]);
+    const status = withInput(
+      e,
+      [u32In(new Uint32Array(1)), u32In(new Uint32Array(4))],
+      ([out, descs]) => {
+        expect(e.reserveRows(h, 2, out.ptr, 1)).toBe(Status.OK);
+        return e.commitRows(h, 3, descs.ptr, 1);
+      }
+    );
+    expect(status).toBe(Status.RowCount);
+    expect(e.totalRows(h)).toBe(0);
+  });
+
+  it("rejects a reserve for the wrong number of columns, or into a misaligned table", async () => {
+    const e = await newEngine();
+    const h = createGrid(e, SCHEMA);
+    withInput(e, [u32In(new Uint32Array(8))], ([out]) => {
+      expect(e.reserveRows(h, 1, out.ptr, 2)).toBe(Status.BadArgument);
+      expect(e.reserveRows(h, 1, out.ptr + 1, 3)).toBe(Status.BadArgument);
+      expect(e.reserveRows(h, 1, 0, 3)).toBe(Status.BadArgument);
+      expect(e.reserveRows(h, -1, out.ptr, 3)).toBe(Status.RowCount);
+    });
+    expect(e.totalRows(h)).toBe(0);
+  });
+
+  it("rejects a misaligned offsets pointer with BadArgument", async () => {
+    const e = await newEngine();
+    const h = createGrid(e, [{ name: "s", type: ColumnType.String }]);
+
+    // Offsets one byte off an aligned address would be read as int32s
+    // straddling two words, so they are refused rather than read.
+    const status = withInput(
+      e,
+      [
+        bytesIn(new TextEncoder().encode("ab")),
+        u32In(Uint32Array.from([0, 2, 0])),
+        u32In(new Uint32Array(4)),
+      ],
+      ([blob, offsets, descs]) => {
+        expect(e.reserveRows(h, 1, descs.ptr, 1)).toBe(Status.OK);
+        new Uint32Array(e.memory.buffer, descs.ptr, 4).set([
+          blob.ptr,
+          blob.len,
+          offsets.ptr + 1,
+          1,
+        ]);
+        return e.commitRows(h, 1, descs.ptr, 1);
       }
     );
     expect(status).toBe(Status.BadArgument);
+    expect(e.totalRows(h)).toBe(0);
   });
 
   it("rejects string offsets that run past the blob", async () => {
@@ -285,13 +354,15 @@ describe("insertColumns", () => {
         u32In(Uint32Array.from([0, 999])),
         u32In(new Uint32Array(4)),
       ],
-      ([blob, offsets, descPtr]) => {
-        new Uint32Array(e.memory.buffer, descPtr.ptr, 4).set([blob.ptr, blob.len, offsets.ptr, 1]);
-        return e.insertColumns(h, descPtr.ptr, 1);
+      ([blob, offsets, descs]) => {
+        expect(e.reserveRows(h, 1, descs.ptr, 1)).toBe(Status.OK);
+        new Uint32Array(e.memory.buffer, descs.ptr, 4).set([blob.ptr, blob.len, offsets.ptr, 1]);
+        return e.commitRows(h, 1, descs.ptr, 1);
       }
     );
     // Offsets that leave the blob are caught before a byte of it is read.
     expect(status).toBe(Status.RowCount);
+    expect(e.dictLen(h, 0)).toBe(0);
   });
 });
 
@@ -556,7 +627,7 @@ describe("dictionary mirror", () => {
 describe("at 200k rows", () => {
   const ROWS = 200_000;
 
-  it("loads in one insertColumns and reads windows anywhere", async () => {
+  it("loads in one append and reads windows anywhere", async () => {
     const { e, h } = await seeded(ROWS);
 
     expect(e.rowCount(h)).toBe(ROWS);
@@ -640,7 +711,8 @@ describe("a dropped handle", () => {
 
     const calls: Array<[string, () => number]> = [
       ["dropGrid", () => e.dropGrid(h)],
-      ["insertColumns", () => e.insertColumns(h, 0, 3)],
+      ["reserveRows", () => e.reserveRows(h, 1, 8, 3)],
+      ["commitRows", () => e.commitRows(h, 0, 0, 3)],
       ["setCellI32", () => e.setCellI32(h, 0, 0, 1)],
       ["setCellF64", () => e.setCellF64(h, 0, 1, 1)],
       ["setCellString", () => e.setCellString(h, 0, 2, 0, 0)],

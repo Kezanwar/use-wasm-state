@@ -195,26 +195,26 @@ Median of 15 runs over 200,000 rows, on Apple M2 Pro (10 cores, 16 GB), darwin 2
 
 | | Typical JS | Tuned JS | Wasm |
 | --- | ---: | ---: | ---: |
-| Load | 28.2 ms | **14.8 ms** | 54.1 ms |
-| Sort f64 | 109 ms | 51.8 ms | **7.05 ms** |
-| Sort i32 | 59.4 ms | 44.4 ms | **2.39 ms** |
-| Sort string | 263 ms | 59.2 ms | **2.61 ms** |
-| Sort, two keys | 284 ms | 73.1 ms | **7.81 ms** |
-| Filter > | 9.28 ms | **2.28 ms** | 2.47 ms |
-| Filter between | 8.88 ms | 3.01 ms | **1.96 ms** |
-| Filter string = | 9.07 ms | 2.54 ms | **1.74 ms** |
-| Filter string in | 10.6 ms | 3.13 ms | **2.65 ms** |
-| Filter contains | 17.0 ms | 2.78 ms | **1.95 ms** |
-| Search | 26.4 ms | 3.86 ms | **3.41 ms** |
-| Filter + search + sort | 74.4 ms | 23.8 ms | **5.18 ms** |
-| setCell | 183 ns | **111 ns** | 194 ns |
-| setCell, sorted | 157 ms | 52.5 ms | **6.93 ms** |
-| view(50) | **1.58 µs** | 11.4 µs | 13.6 µs |
-| Delete 1,000 rows | 5.46 ms | **376 µs** | 1.62 ms |
+| Load | 29.2 ms | **15.8 ms** | 52.2 ms |
+| Sort f64 | 104 ms | 50.6 ms | **6.87 ms** |
+| Sort i32 | 57.5 ms | 43.2 ms | **2.27 ms** |
+| Sort string | 239 ms | 58.4 ms | **2.55 ms** |
+| Sort, two keys | 271 ms | 72.9 ms | **7.90 ms** |
+| Filter > | 9.31 ms | **2.31 ms** | 2.39 ms |
+| Filter between | 8.83 ms | 2.92 ms | **2.04 ms** |
+| Filter string = | 8.87 ms | 2.42 ms | **1.71 ms** |
+| Filter string in | 10.3 ms | 3.05 ms | **2.47 ms** |
+| Filter contains | 16.8 ms | 2.70 ms | **1.91 ms** |
+| Search | 26.0 ms | 3.82 ms | **3.33 ms** |
+| Filter + search + sort | 75.9 ms | 23.9 ms | **5.10 ms** |
+| setCell | 194 ns | **134 ns** | 196 ns |
+| setCell, sorted | 153 ms | 52.1 ms | **6.83 ms** |
+| view(50) | **1.44 µs** | 10.8 µs | 13.1 µs |
+| Delete 1,000 rows | 5.43 ms | **409 µs** | 1.53 ms |
 | JS memory after load | 26.1 MB | 8.4 MB | 2.3 MB |
-| Wasm memory after load |  |  | 33.6 MB |
+| Wasm memory after load, reserved / live |  |  | 16.8 MB / 15.6 MB |
 
-`datagrid.wasm` is 55,173 bytes. The [Benchmarks tab](https://kezanwar.github.io/use-wasm-state/#benchmarks) runs the same benchmark in your browser, and adds what each costs in frames.
+Typical JS's heap leaves out the strings it shares with the input. `datagrid.wasm` is 56,999 bytes. The [Benchmarks tab](https://kezanwar.github.io/use-wasm-state/#benchmarks) runs the same benchmark in your browser, and adds what each costs in frames.
 <!-- benchmarks:end -->
 
 Wasm's lead is sorting, including the re-sort an edit costs while a sort

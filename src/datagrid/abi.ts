@@ -434,18 +434,31 @@ export interface EngineExports extends WasmAllocator, InputHost {
   /** Release a block from alloc. Never pass it a view or input pointer. */
   free(ptr: number): void;
 
+  /**
+   * Run a collection and return the bytes the engine's heap still holds.
+   * For measuring, beside `memory.buffer.byteLength`; never per frame.
+   */
+  liveBytes(): number;
+
   /** Returns a handle, or a negative status. */
   createGrid(schemaPtr: number, schemaLen: number): number;
   dropGrid(handle: number): number;
 
   /**
-   * Append rows. `descPtr` points at `colCount` descriptors, one per column
-   * in schema order, each four u32s: dataPtr, dataLen, offsetsPtr, rowCount.
-   *
-   * Returns the first row id appended, or a negative status. Atomic: a
-   * rejected insert leaves the grid untouched.
+   * Make room for `n` rows and write where each column's go at `outPtr`:
+   * `colCount` u32 offsets in schema order. Returns a status. Nothing
+   * changes until commitRows. Call only through appendRows in ./append.
    */
-  insertColumns(handle: number, descPtr: number, colCount: number): number;
+  reserveRows(handle: number, n: number, outPtr: number, colCount: number): number;
+
+  /**
+   * Add the `n` rows written after reserveRows. `descPtr` points at
+   * `colCount` descriptors, four u32s each: a string column's is blobPtr,
+   * blobLen, offsetsPtr, n; the rest are zeros. Returns the first row id,
+   * or a negative status. Atomic: a rejected commit leaves the grid as it
+   * was.
+   */
+  commitRows(handle: number, n: number, descPtr: number, colCount: number): number;
 
   setCellI32(handle: number, row: number, col: number, value: number): number;
   setCellF64(handle: number, row: number, col: number, value: number): number;
@@ -484,9 +497,11 @@ export const ENGINE_EXPORTS = [
   "inputBuffer",
   "alloc",
   "free",
+  "liveBytes",
   "createGrid",
   "dropGrid",
-  "insertColumns",
+  "reserveRows",
+  "commitRows",
   "setCellI32",
   "setCellF64",
   "setCellString",

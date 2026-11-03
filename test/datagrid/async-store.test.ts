@@ -108,6 +108,35 @@ describe("mutations", () => {
   });
 });
 
+describe("appending in the worker", () => {
+  it("adds rows through insertRows and insertColumns after a load, under a sort", async () => {
+    const { grid } = await seeded();
+    await grid.setQuery({ sort: [{ column: "price", direction: "desc" }] });
+
+    expect((await grid.insertRows([{ id: 600, price: 99, status: "fresh" }])).first).toBe(5);
+    expect((await grid.insertColumns({ id: [700], price: [0], status: ["new"] })).first).toBe(6);
+    expect(grid.rowCount).toBe(7);
+
+    const stop = grid.watch(0, 7);
+    await vi.waitFor(() => expect(grid.view(0, 7).length).toBe(7));
+    const rows = grid.view(0, 7).rows();
+    expect(rows[0]).toEqual({ id: 600, price: 99, status: "fresh" });
+    expect(rows[6]).toEqual({ id: 700, price: 0, status: "new" });
+    stop();
+  });
+
+  it("leaves the grid untouched when an append is rejected", async () => {
+    const { grid } = await seeded();
+    const revision = grid.revision;
+    await expect(
+      grid.insertColumns({ id: [1, 2], price: [1], status: ["a", "b"] })
+    ).rejects.toMatchObject({ code: "row-count", op: "insertColumns" });
+    expect(grid.rowCount).toBe(5);
+    expect(grid.revision).toBe(revision);
+    expect((await grid.insertRows([{ id: 9, price: 9, status: "new" }])).first).toBe(5);
+  });
+});
+
 describe("queries", () => {
   it("sorts, filters and searches", async () => {
     const { grid } = await seeded();

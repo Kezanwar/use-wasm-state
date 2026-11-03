@@ -38,6 +38,12 @@ export function formatMs(ms) {
 
 export const formatMB = (bytes) => `${(bytes / 1e6).toFixed(1)} MB`;
 
+/** Reserved linear memory, and the engine's live heap within it. */
+export function formatWasmMemory({ wasm, wasmLive }) {
+  if (wasm === null) return "";
+  return wasmLive == null ? formatMB(wasm) : `${formatMB(wasm)} / ${formatMB(wasmLive)}`;
+}
+
 export function renderBlock(figures, wasmBytes) {
   const { machine, runtime } = figures;
   const lines = [
@@ -66,14 +72,15 @@ export function renderBlock(figures, wasmBytes) {
     lines.push(`| JS memory after load | ${js.map(formatMB).join(" | ")} |`);
   }
   lines.push(
-    `| Wasm memory after load | ${IMPLS.map(([id]) =>
-      figures.memory[id].wasm === null ? "" : formatMB(figures.memory[id].wasm)
+    `| Wasm memory after load, reserved / live | ${IMPLS.map(([id]) =>
+      formatWasmMemory(figures.memory[id])
     ).join(" | ")} |`
   );
 
   lines.push(
     "",
-    `\`datagrid.wasm\` is ${wasmBytes.toLocaleString("en-US")} bytes. ` +
+    "Typical JS's heap leaves out the strings it shares with the input. " +
+      `\`datagrid.wasm\` is ${wasmBytes.toLocaleString("en-US")} bytes. ` +
       "The [Benchmarks tab](https://kezanwar.github.io/use-wasm-state/#benchmarks) runs the same " +
       "benchmark in your browser, and adds what each costs in frames.",
     END

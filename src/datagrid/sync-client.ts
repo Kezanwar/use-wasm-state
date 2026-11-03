@@ -16,7 +16,6 @@ import {
   decodeView,
   encodeQuery,
   encodeSchema,
-  encodeStrings,
   type ColumnSpec,
   type DecodedView,
   type EngineExports,
@@ -25,15 +24,8 @@ import {
 import type { CellValue, ColumnKind, ColumnValues, SyncEngineClient } from "./client";
 import { disposedError } from "../core/errors";
 import { unpack } from "../core/wasm/memory";
-import {
-  bytesIn,
-  f64In,
-  i32In,
-  stringIn,
-  u32In,
-  withInput,
-  type InputArg,
-} from "../core/wasm/input";
+import { bytesIn, i32In, stringIn, withInput } from "../core/wasm/input";
+import { appendRows } from "./append";
 import { check, engineError } from "./errors";
 
 export class SyncClient implements SyncEngineClient {
@@ -96,48 +88,13 @@ export class SyncClient implements SyncEngineClient {
     check(e.dropGrid(handle), "dropGrid");
   }
 
-  /**
-   * Append rows in one call.
-   *
-   * Every buffer goes into the engine's input buffer through a single
-   * withInput, which matters more here than anywhere else: the descriptors
-   * hold offsets into the other blocks, so a buffer that could grow between
-   * writing a column and writing the descriptor pointing at it would leave
-   * that descriptor stale.
-   */
+  /** Append rows. See appendRows for how they get into the engine. */
   insertColumnsSync(handle: number, columns: readonly ColumnValues[]): number {
     const e = this.#e("insertColumns");
-
-    const args: InputArg[] = [];
-    const layout: Array<{ data: number; offsets: number; rows: number }> = [];
-
-    for (const column of columns) {
-      if (column.kind === "string") {
-        const { blob, offsets } = encodeStrings(column.values);
-        layout.push({ data: args.length, offsets: args.length + 1, rows: column.values.length });
-        args.push(bytesIn(blob), u32In(offsets));
-        continue;
-      }
-      layout.push({ data: args.length, offsets: -1, rows: column.values.length });
-      args.push(column.kind === "f64" ? f64In(column.values) : i32In(column.values));
-    }
-
-    const descIndex = args.length;
-    args.push(u32In(new Uint32Array(columns.length * 4)));
-
-    const status = this.#timed(() =>
-      withInput(e, args, (blocks) => {
-        const descs = new Uint32Array(e.memory.buffer, blocks[descIndex]!.ptr, columns.length * 4);
-        for (let i = 0; i < columns.length; i++) {
-          const { data, offsets, rows } = layout[i]!;
-          const d = blocks[data]!;
-          descs.set([d.ptr, d.len, offsets === -1 ? 0 : blocks[offsets]!.ptr, rows], i * 4);
-        }
-        return e.insertColumns(handle, blocks[descIndex]!.ptr, columns.length);
-      })
+    return check(
+      this.#timed(() => appendRows(e, handle, columns)),
+      "insertColumns"
     );
-
-    return check(status, "insertColumns");
   }
 
   setCellSync(

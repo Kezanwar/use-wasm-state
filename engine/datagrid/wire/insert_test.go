@@ -13,7 +13,7 @@ func TestDecodeDescs(t *testing.T) {
 		binary.LittleEndian.PutUint32(b[i*4:], v)
 	}
 
-	got, err := DecodeDescs(b, 2)
+	got, err := DecodeDescs(nil, b, 2)
 	if err != nil {
 		t.Fatalf("DecodeDescs: %v", err)
 	}
@@ -41,7 +41,7 @@ func TestDecodeDescsRejects(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if _, err := DecodeDescs(tc.b, tc.n); !errors.Is(err, abi.ErrBadArgument) {
+			if _, err := DecodeDescs(nil, tc.b, tc.n); !errors.Is(err, abi.ErrBadArgument) {
 				t.Fatalf("DecodeDescs = %v, want abi.ErrBadArgument", err)
 			}
 		})

@@ -21,6 +21,8 @@ export interface WasmGrid<S extends SchemaSpec> {
   store: DataGridStore<S>;
   /** Bytes of linear memory the engine has reserved. */
   linearMemory(): number;
+  /** Bytes its heap holds after a collection. */
+  liveMemory(): number;
   dispose(): void;
 }
 
@@ -36,6 +38,7 @@ export async function createWasmGrid<S extends SchemaSpec>(
   return {
     store,
     linearMemory: () => exports.memory.buffer.byteLength,
+    liveMemory: () => exports.liveBytes(),
     dispose() {
       store.dispose();
       client.dispose();

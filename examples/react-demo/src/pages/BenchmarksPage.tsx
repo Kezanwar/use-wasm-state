@@ -12,7 +12,7 @@ import { PUBLISHED } from "@/bench/figures";
 import { formatMB, formatMs } from "@/bench/format";
 import { frameBudget, measureFrames, type FrameCost } from "@/bench/frames";
 import { implementations, LABELS } from "@/bench/implementations";
-import type { ImplId, Results } from "@/bench/runner";
+import type { ImplId, MemoryResult, Results } from "@/bench/runner";
 import { generateOrders, orders } from "@/lib/orders";
 
 type Schema = typeof orders.spec;
@@ -212,25 +212,41 @@ function FiguresTable({
             );
           })}
           {IMPLS.every((id) => results.memory[id]?.js != null) && (
-            <MemoryRow label="JS memory" values={IMPLS.map((id) => results.memory[id]!.js)} />
+            <MemoryRow
+              label="JS memory"
+              cells={IMPLS.map((id) => formatMB(results.memory[id]!.js!))}
+            />
           )}
           <MemoryRow
-            label="Wasm memory"
-            values={IMPLS.map((id) => results.memory[id]?.wasm ?? null)}
+            label="Wasm memory, reserved / live"
+            cells={IMPLS.map((id) => wasmMemory(results.memory[id]))}
           />
         </tbody>
       </table>
+      {IMPLS.every((id) => results.memory[id]?.js != null) && (
+        <p className="text-muted-foreground text-xs">
+          Typical JS's heap leaves out the strings it shares with the input.
+        </p>
+      )}
     </div>
   );
 }
 
-function MemoryRow({ label, values }: { label: string; values: (number | null)[] }) {
+/** Reserved linear memory, and the engine's live heap within it. */
+function wasmMemory(memory: MemoryResult | undefined): string {
+  if (memory?.wasm == null) return "";
+  return memory.wasmLive == null
+    ? formatMB(memory.wasm)
+    : `${formatMB(memory.wasm)} / ${formatMB(memory.wasmLive)}`;
+}
+
+function MemoryRow({ label, cells }: { label: string; cells: string[] }) {
   return (
     <tr className="border-border/50 border-t">
       <td className="text-muted-foreground py-1 pr-2">{label}</td>
-      {values.map((bytes, i) => (
+      {cells.map((text, i) => (
         <td key={i} className="py-1 text-right">
-          {bytes === null ? "" : formatMB(bytes)}
+          {text}
         </td>
       ))}
     </tr>
