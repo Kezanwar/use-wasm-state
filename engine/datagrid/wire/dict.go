@@ -45,7 +45,7 @@ func EncodeDictInto(values []string) []byte {
 // DictSize(values) bytes.
 //
 // Layout: u32 count, then count+1 u32 byte offsets, then the UTF-8 blob.
-// The same shape insertColumns takes strings in, so JS has one encoder and
+// The same shape commitRows takes strings in, so JS has one encoder and
 // one decoder for both directions. Offsets are relative to the start of the
 // blob, not the buffer.
 func EncodeDict(values []string, dst []byte) int {

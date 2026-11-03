@@ -20,6 +20,7 @@
 package main
 
 import (
+	"runtime"
 	"unsafe"
 
 	"github.com/Kezanwar/use-wasm-state/engine/abi"
@@ -72,6 +73,19 @@ func alloc(size int32) unsafe.Pointer { return abi.Alloc(size) }
 //go:wasmexport free
 func free(ptr unsafe.Pointer) { abi.Free(ptr) }
 
+// liveBytes runs a collection and returns the bytes the engine's heap
+// still holds: every grid, dictionary and buffer. It is for measurement,
+// set beside the linear memory the module has reserved, and never for a
+// hot path: a collection is the most expensive thing the module does.
+//
+//go:wasmexport liveBytes
+func liveBytes() int32 {
+	runtime.GC()
+	var m runtime.MemStats
+	runtime.ReadMemStats(&m)
+	return int32(m.HeapAlloc)
+}
+
 /* ------------------------------------------------------------------ */
 /* Grids                                                              */
 /* ------------------------------------------------------------------ */
@@ -92,16 +106,59 @@ func createGrid(schemaPtr unsafe.Pointer, schemaLen int32) int32 {
 //go:wasmexport dropGrid
 func dropGrid(h int32) int32 { return wire.StatusOf(engine.DropGrid(h)) }
 
-// insertColumns appends rows, one descriptor per column in schema order.
+// reserveRows makes room for n rows and writes where each column's go at
+// outPtr: colCount u32 offsets, in schema order. JS then writes every
+// column straight into its final storage, so a load never holds the
+// dataset twice, and calls commitRows with the same n. Nothing about the
+// grid changes until then. The offsets stay valid until the next
+// reserveRows.
 //
-// The i32 and f64 columns are handed to the grid as slices aliasing JS's
-// own buffers rather than copied first: InsertColumns copies what it keeps,
-// and the alias does not outlive this call. That saves a second copy of the
-// whole dataset, which at 200k rows is megabytes of linear memory the module
-// would otherwise have to grow to hold.
+// One TypeScript function calls this pair, appendRows in
+// src/datagrid/append.ts, and it calls nothing else in between.
 //
-//go:wasmexport insertColumns
-func insertColumns(h int32, descPtr unsafe.Pointer, colCount int32) int32 {
+//go:wasmexport reserveRows
+func reserveRows(h, n int32, outPtr unsafe.Pointer, colCount int32) int32 {
+	t, err := engine.Grid(h)
+	if err != nil {
+		return wire.StatusOf(err)
+	}
+	s := t.Schema()
+	if int(colCount) != len(s) || outPtr == nil || !abi.Aligned(outPtr) {
+		return abi.StatusBadArgument
+	}
+	slots, err := t.Reserve(n)
+	if err != nil {
+		return wire.StatusOf(err)
+	}
+	out := unsafe.Slice((*uint32)(outPtr), colCount)
+	for i := range slots {
+		var at unsafe.Pointer
+		if s[i].Type == datagrid.F64 {
+			at = unsafe.Pointer(unsafe.SliceData(slots[i].F64))
+		} else {
+			at = unsafe.Pointer(unsafe.SliceData(slots[i].I32))
+		}
+		out[i] = uint32(uintptr(at))
+	}
+	return abi.StatusOK
+}
+
+// Kept between calls so a commit decodes its descriptors without
+// allocating: an append is steady-state work.
+var (
+	commitDescs []wire.ColumnDesc
+	commitText  []datagrid.ColumnData
+)
+
+// commitRows adds the n rows written after reserveRows, a string column's
+// as dictionary ids. descPtr points at colCount descriptors in schema
+// order; a string column's carries the strings new to its dictionary that
+// the ids above its length name (see wire.ColumnDesc), and the others are
+// zeros. Returns the first row id, or a negative status. Atomic:
+// everything is checked before anything changes.
+//
+//go:wasmexport commitRows
+func commitRows(h, n int32, descPtr unsafe.Pointer, colCount int32) int32 {
 	t, err := engine.Grid(h)
 	if err != nil {
 		return wire.StatusOf(err)
@@ -110,41 +167,35 @@ func insertColumns(h int32, descPtr unsafe.Pointer, colCount int32) int32 {
 	if int(colCount) != len(s) {
 		return abi.StatusBadArgument
 	}
-
-	descs, err := wire.DecodeDescs(abi.BytesAt(descPtr, colCount*wire.DescSize), colCount)
+	commitDescs, err = wire.DecodeDescs(commitDescs, abi.BytesAt(descPtr, colCount*wire.DescSize), colCount)
 	if err != nil {
 		return wire.StatusOf(err)
 	}
-
-	cols := make([]datagrid.ColumnData, colCount)
-	for i := range descs {
-		d := &descs[i]
-		data := abi.PtrAt(d.DataPtr)
-		if d.DataLen > 0 && !abi.Aligned(data) {
+	for len(commitText) < int(colCount) {
+		commitText = append(commitText, datagrid.ColumnData{})
+	}
+	text := commitText[:colCount]
+	for i := range text {
+		text[i] = datagrid.ColumnData{}
+		if s[i].Type != datagrid.String {
+			continue
+		}
+		d := &commitDescs[i]
+		// Offsets are read as RowCount+1 values, so a count no append could
+		// need, more new strings than rows, is refused before a slice that
+		// long is made.
+		if n < 0 || d.RowCount > uint32(n) {
 			return abi.StatusBadArgument
 		}
-
-		switch s[i].Type {
-		case datagrid.I32:
-			cols[i].I32 = unsafe.Slice((*int32)(data), d.DataLen)
-		case datagrid.F64:
-			cols[i].F64 = unsafe.Slice((*float64)(data), d.DataLen)
-		case datagrid.String:
-			// Handed over packed rather than decoded into one Go string per
-			// row. The dictionary keeps only the distinct values, so
-			// building 200k strings to keep six would be 200k allocations
-			// the engine immediately throws away. InsertColumns validates
-			// the offsets before it reads a byte of the blob.
-			offs := abi.PtrAt(d.OffsetsPtr)
-			if !abi.Aligned(offs) {
-				return abi.StatusBadArgument
-			}
-			cols[i].Blob = abi.BytesAt(data, int32(d.DataLen))
-			cols[i].Offsets = unsafe.Slice((*int32)(offs), d.RowCount+1)
+		offs := abi.PtrAt(d.OffsetsPtr)
+		if offs == nil || !abi.Aligned(offs) {
+			return abi.StatusBadArgument
 		}
+		text[i].Blob = abi.BytesAt(abi.PtrAt(d.DataPtr), int32(d.DataLen))
+		text[i].Offsets = unsafe.Slice((*int32)(offs), d.RowCount+1)
 	}
 
-	first, err := t.InsertColumns(cols)
+	first, err := t.Commit(n, text)
 	if err != nil {
 		return wire.StatusOf(err)
 	}

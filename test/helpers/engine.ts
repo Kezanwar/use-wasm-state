@@ -9,13 +9,14 @@ import {
   decodeView,
   encodeQuery,
   encodeSchema,
-  encodeStrings,
   type ColumnSpec,
   type DecodedView,
   type EngineExports,
   type WireQuery,
 } from "../../src/datagrid/abi";
-import { bytesIn, f64In, i32In, stringIn, u32In, withInput } from "../../src/core/wasm/input";
+import { bytesIn, i32In, stringIn, withInput } from "../../src/core/wasm/input";
+import { appendRows } from "../../src/datagrid/append";
+import type { ColumnValues } from "../../src/datagrid/client";
 
 /**
  * Harness for driving the real datagrid.wasm from Node.
@@ -68,47 +69,23 @@ export type ColumnInput =
   | { type: typeof ColumnType.String; values: readonly string[] };
 
 /**
- * Append rows: one descriptor per column, and a single insertColumns call.
- *
- * Every buffer lands in the input buffer in one withInput, which matters
- * more here than anywhere else. The descriptors hold offsets into the other
- * blocks, so if the buffer could grow between writing a column and writing
- * the descriptor that points at it, the descriptor would carry a stale
- * offset. Sizing everything up front is what makes that impossible.
+ * Append rows through appendRows, as SyncClient does, with dictionaries
+ * caught up from the engine afresh each call rather than kept.
  */
 export function insertColumns(
   e: EngineExports,
   handle: number,
   columns: readonly ColumnInput[]
 ): number {
-  const args = [];
-  // Which block index holds each column's data, and its offsets if it has
-  // any. Filled as the args are built, read once the blocks exist.
-  const layout: Array<{ data: number; offsets: number; rows: number }> = [];
-
-  for (const column of columns) {
-    if (column.type === ColumnType.String) {
-      const { blob, offsets } = encodeStrings(column.values);
-      layout.push({ data: args.length, offsets: args.length + 1, rows: column.values.length });
-      args.push(bytesIn(blob), u32In(offsets));
-      continue;
-    }
-    layout.push({ data: args.length, offsets: -1, rows: column.values.length });
-    args.push(column.type === ColumnType.F64 ? f64In(column.values) : i32In(column.values));
-  }
-
-  const descIndex = args.length;
-  args.push(u32In(new Uint32Array(columns.length * 4)));
-
-  return withInput(e, args, (blocks) => {
-    const descs = new Uint32Array(e.memory.buffer, blocks[descIndex]!.ptr, columns.length * 4);
-    columns.forEach((_column, i) => {
-      const { data, offsets, rows } = layout[i]!;
-      const d = blocks[data]!;
-      descs.set([d.ptr, d.len, offsets === -1 ? 0 : blocks[offsets]!.ptr, rows], i * 4);
-    });
-    return e.insertColumns(handle, blocks[descIndex]!.ptr, columns.length);
-  });
+  return appendRows(
+    e,
+    handle,
+    columns.map((column): ColumnValues => {
+      if (column.type === ColumnType.String) return { kind: "string", values: column.values };
+      return { kind: column.type === ColumnType.F64 ? "f64" : "i32", values: column.values };
+    }),
+    []
+  );
 }
 
 export function setQuery(e: EngineExports, handle: number, query: WireQuery): number {

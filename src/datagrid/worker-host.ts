@@ -49,10 +49,12 @@ export function createGridHost(port: HostPort): Host<Request> {
       if (schema[col]!.type !== 2) continue;
       const key = keyFor(handle, col);
       const known = sent.get(key) ?? 0;
-      const length = c.dictLenSync(handle, col);
-      if (length === known) continue;
-      dictionaries[col] = c.dictSinceSync(handle, col, known);
-      sent.set(key, length);
+      // The client's own copy, which appends here already keep current, so
+      // the delta is sliced rather than decoded a second time.
+      const values = c.dictionarySync(handle, col);
+      if (values.length === known) continue;
+      dictionaries[col] = values.slice(known);
+      sent.set(key, values.length);
     }
 
     const out: WindowData[] = [];

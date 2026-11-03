@@ -11,8 +11,10 @@ type bitset []uint64
 // grow makes room for n bits. New words are zero: nothing starts deleted.
 func (b *bitset) grow(n int32) {
 	words := int((n + 63) >> 6)
-	if len(*b) < words {
-		*b = append(*b, make(bitset, words-len(*b))...)
+	// Word by word, so append's doubling amortises a run of small appends
+	// and no temporary slice is made for each one.
+	for len(*b) < words {
+		*b = append(*b, 0)
 	}
 }
 

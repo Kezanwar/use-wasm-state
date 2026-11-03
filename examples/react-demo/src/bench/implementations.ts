@@ -38,7 +38,12 @@ export function implementations(wasmUrl: string): Implementation[] {
       label: LABELS.wasm,
       create: async () => {
         const grid = await createWasmGrid(orders, wasmUrl);
-        return { store: grid.store, linearMemory: grid.linearMemory, dispose: grid.dispose };
+        return {
+          store: grid.store,
+          linearMemory: grid.linearMemory,
+          liveMemory: grid.liveMemory,
+          dispose: grid.dispose,
+        };
       },
     },
   ];

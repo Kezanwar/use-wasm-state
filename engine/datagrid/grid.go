@@ -1,5 +1,7 @@
 package datagrid
 
+import "math"
+
 // column is one column's storage. Which slice is live follows typ; the other
 // is nil. A string column keeps its dictionary ids in i32, because that is
 // exactly what View hands back and what crosses to JS.
@@ -36,6 +38,14 @@ type Grid struct {
 	// and what RowCount measures. Rebuilt, never patched.
 	order []int32
 
+	// slots is what Reserve last returned, kept so an append does not
+	// allocate the slice that describes it, and reserved is how many rows
+	// it made room for: the only count Commit accepts. remap is Commit's
+	// scratch for the ids new strings actually got.
+	slots    []ColumnData
+	reserved int32
+	remap    []int32
+
 	// parsed is the query as a struct, for reading and applying; query is
 	// the same thing flattened to bytes, for telling one query from
 	// another in a single comparison. See SetQuery.
@@ -67,7 +77,9 @@ const revisionMask uint32 = 0x7fffffff
 
 func nextRevision(r uint32) uint32 { return (r + 1) & revisionMask }
 
-// ColumnData carries one column's worth of new rows for InsertColumns.
+// ColumnData carries one column's worth of values: new rows for
+// InsertColumns, the strings sent with Commit, or the reserved space
+// Reserve hands back.
 // Exactly one field is set, matching that column's type. Strings are
 // interned on the way in; the caller never sees an id.
 //
@@ -170,10 +182,9 @@ func (t *Grid) columnOf(col int32, want ColumnType) (*column, error) {
 // InsertColumns appends rows, one slice per column in schema order, and
 // returns the id of the first row appended.
 //
-// One call for the whole batch on purpose: the cost that matters is crossing
-// the wasm boundary, so 200k rows arrive as a handful of buffers rather than
-// 200k calls. Nothing is written until every column has been checked, so a
-// rejected insert leaves the grid exactly as it was.
+// It is Reserve and Commit with a copy in between, for callers that already
+// hold the rows in Go. The ABI does the same thing without the copy: JS
+// writes each column straight into the space Reserve hands back.
 //
 // Appending zero rows succeeds and does not bump the revision: there is
 // nothing for a subscriber to re-render.
@@ -181,59 +192,175 @@ func (t *Grid) InsertColumns(data []ColumnData) (firstRowID int32, err error) {
 	if len(data) != len(t.cols) {
 		return 0, ErrColumnCount
 	}
-
 	n := columnLen(&data[0], t.cols[0].typ)
 	for i := range t.cols {
 		if columnLen(&data[i], t.cols[i].typ) != n {
 			return 0, ErrRowCount
 		}
-		if t.cols[i].typ == String && data[i].packed() {
-			if err := checkOffsets(&data[i]); err != nil {
-				return 0, err
+	}
+
+	slots, err := t.Reserve(n)
+	if err != nil {
+		return 0, err
+	}
+	for i := range t.cols {
+		switch t.cols[i].typ {
+		case I32:
+			copy(slots[i].I32, data[i].I32)
+		case F64:
+			copy(slots[i].F64, data[i].F64)
+		case String:
+			// Every row's string is sent as new, row j's as the j-th, and
+			// Commit folds the ones the dictionary already holds.
+			base := t.cols[i].dict.len()
+			for j := range slots[i].I32 {
+				slots[i].I32[j] = base + int32(j)
 			}
 		}
 	}
+	return t.Commit(n, data)
+}
+
+// Reserve makes room for n more rows without adding them, and returns one
+// slice per column, each n long, over the storage those rows will occupy:
+// F64 for an f64 column, I32 for the rest, a string column's being its
+// dictionary ids.
+//
+// This is how a load avoids holding the dataset twice. The caller writes
+// every column into its final place, then calls Commit. Until then the grid
+// is unchanged, so a caller that reserves and gives up leaves only spare
+// capacity behind. The slices are valid until the next Reserve.
+//
+// Capacity doubles when it runs out, so appends are amortised: after a 200k
+// load, adding a row copies one row, not 200k. A first load sizes exactly,
+// so it leaves no slack behind.
+func (t *Grid) Reserve(n int32) ([]ColumnData, error) {
+	if n < 0 || n > math.MaxInt32-t.rows {
+		return nil, ErrRowCount
+	}
+	total := t.rows + n
+	if len(t.slots) != len(t.cols) {
+		t.slots = make([]ColumnData, len(t.cols))
+	}
+	for i := range t.cols {
+		c := &t.cols[i]
+		if c.typ == F64 {
+			c.f64 = reserve(c.f64, total)
+			t.slots[i] = ColumnData{F64: c.f64[t.rows:total]}
+		} else {
+			c.i32 = reserve(c.i32, total)
+			t.slots[i] = ColumnData{I32: c.i32[t.rows:total]}
+		}
+	}
+	t.reserved = n
+	return t.slots, nil
+}
+
+// Commit adds the n rows written into the slices Reserve returned, and
+// returns the id of the first. n must be what Reserve was given.
+//
+// Every value is already in place, a string column's as dictionary ids.
+// An id below the dictionary's length is an entry it holds; the ones above
+// name, in order, the strings in that column's entry of added, Strings or
+// packed. Those are checked against the dictionary here rather than
+// trusted: two strings JS tells apart can be the same bytes (lone
+// surrogates both encode to U+FFFD), and the dictionary must never hold a
+// value twice, so a string it already has keeps its id and the rows naming
+// it are remapped. Numeric entries of added are ignored.
+//
+// Everything is checked before anything changes, so a rejected commit
+// leaves the grid as it was.
+func (t *Grid) Commit(n int32, added []ColumnData) (firstRowID int32, err error) {
+	if len(added) != len(t.cols) {
+		return 0, ErrColumnCount
+	}
+	if n < 0 || n > math.MaxInt32-t.rows {
+		return 0, ErrRowCount
+	}
+	// Anything but what was reserved would commit rows nobody wrote.
+	if n != t.reserved {
+		return 0, ErrRowCount
+	}
+	total := t.rows + n
+	for i := range t.cols {
+		c := &t.cols[i]
+		if c.typ != String {
+			continue
+		}
+		if added[i].packed() {
+			if err := checkOffsets(&added[i]); err != nil {
+				return 0, err
+			}
+		}
+		limit := c.dict.len() + columnLen(&added[i], String)
+		for _, id := range c.i32[t.rows:total] {
+			if uint32(id) >= uint32(limit) {
+				return 0, ErrNoSuchString
+			}
+		}
+	}
+	t.reserved = 0
 	if n == 0 {
 		return t.rows, nil
 	}
 
 	first := t.rows
-	total := t.rows + n
-
 	for i := range t.cols {
 		c := &t.cols[i]
-		switch c.typ {
-		case I32:
-			c.i32 = growI32(c.i32, total)
-			copy(c.i32[first:], data[i].I32)
-		case F64:
-			c.f64 = growF64(c.f64, total)
-			copy(c.f64[first:], data[i].F64)
-		case String:
-			// Interning is the expensive part of a large insert: one hash
-			// and one comparison per cell. It buys a column that is four
-			// bytes a row however long the strings are, and a dictionary JS
-			// fetches once instead of a string per cell per frame.
-			c.dict.sizeHint(n)
-			c.i32 = growI32(c.i32, total)
-			ids := c.i32[first:]
-			if data[i].packed() {
-				blob, offs := data[i].Blob, data[i].Offsets
-				for j := int32(0); j < n; j++ {
-					ids[j] = c.dict.internBytes(blob[offs[j]:offs[j+1]])
-				}
-			} else {
-				for j, v := range data[i].Strings {
-					ids[j] = c.dict.intern(v)
-				}
-			}
+		if c.typ == F64 {
+			c.f64 = c.f64[:total]
+			continue
+		}
+		c.i32 = c.i32[:total]
+		if c.typ == String {
+			t.addStrings(c, &added[i], c.i32[first:])
 		}
 	}
 
-	t.rows += n
+	t.rows = total
 	t.deleted.grow(t.rows)
-	t.bumpLiveness()
+	t.revision = nextRevision(t.revision)
+	if !t.parsed.empty() {
+		t.rebuildOrder()
+		return first, nil
+	}
+	// With no query the order is every live row by id, and new rows are
+	// live and come last: append them rather than rebuild 200k rows to add
+	// one.
+	t.order = reserve(t.order, int32(len(t.order))+n)
+	for id := first; id < total; id++ {
+		t.order = append(t.order, id)
+	}
 	return first, nil
+}
+
+// addStrings interns the strings sent with a commit and, if any turned out
+// to be in the dictionary already, points the rows naming them at the
+// entry it holds. Usually none do and the rows are left alone.
+func (t *Grid) addStrings(c *column, added *ColumnData, ids []int32) {
+	base := c.dict.len()
+	count := columnLen(added, String)
+	c.dict.sizeHint(count)
+	t.remap = t.remap[:0]
+	moved := false
+	for j := int32(0); j < count; j++ {
+		var id int32
+		if added.packed() {
+			id = c.dict.internBytes(added.Blob[added.Offsets[j]:added.Offsets[j+1]])
+		} else {
+			id = c.dict.intern(added.Strings[j])
+		}
+		t.remap = append(t.remap, id)
+		moved = moved || id != base+j
+	}
+	if !moved {
+		return
+	}
+	for r, id := range ids {
+		if id >= base {
+			ids[r] = t.remap[id-base]
+		}
+	}
 }
 
 // columnLen is how many rows a ColumnData carries for a column of this type.
@@ -275,27 +402,19 @@ func checkOffsets(d *ColumnData) error {
 	return nil
 }
 
-// growI32 and growF64 resize a column to exactly n elements in one
-// allocation.
-//
-// Not append: append grows geometrically, so loading a dataset in a few
-// calls reallocates several times and leaves spare capacity behind. Sizing
-// to the final length means one allocation per column per insert, and under
-// this collector an allocation avoided is work the GC never has to do.
-func growI32(s []int32, n int32) []int32 {
+// reserve returns s with capacity for at least n elements, keeping its
+// length. Growth doubles, or goes straight to n when that is further, so a
+// single large load allocates exactly once and a run of small appends is
+// amortised.
+func reserve[T int32 | float64](s []T, n int32) []T {
 	if int32(cap(s)) >= n {
-		return s[:n]
+		return s
 	}
-	out := make([]int32, n)
-	copy(out, s)
-	return out
-}
-
-func growF64(s []float64, n int32) []float64 {
-	if int32(cap(s)) >= n {
-		return s[:n]
+	size := 2 * cap(s)
+	if size < int(n) {
+		size = int(n)
 	}
-	out := make([]float64, n)
+	out := make([]T, len(s), size)
 	copy(out, s)
 	return out
 }
@@ -427,6 +546,9 @@ func (t *Grid) rebuildOrder() {
 	filtered := len(t.parsed.Filters) > 0
 	searching := t.parsed.Search != ""
 
+	// Sized for every row up front, so a rebuild never grows the order by
+	// appending and leaves no trail of outgrown copies for the collector.
+	t.order = reserve(t.order, t.rows)
 	order := t.order[:0]
 	for w := 0; w < len(t.deleted); w++ {
 		base := int32(w) << 6

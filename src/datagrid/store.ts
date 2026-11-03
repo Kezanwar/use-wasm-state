@@ -206,13 +206,13 @@ export function createDataGridStore<S extends SchemaSpec>(
   const listeners = new Set<() => void>();
 
   /**
-   * One string[] per string column, kept in step with the engine's
-   * append-only dictionary. Dictionaries only ever grow, so this is topped
-   * up with dictSince(known) rather than refetched.
+   * Each string column's dictionary, in id order: the client's own copy,
+   * which appends intern against. Dictionaries only ever grow, so it is
+   * topped up with what the engine added rather than refetched.
    */
-  const mirrors = new Map<number, string[]>();
+  const mirrors = new Map<number, readonly string[]>();
   for (let i = 0; i < schema.kinds.length; i++) {
-    if (schema.kinds[i] === "string") mirrors.set(i, []);
+    if (schema.kinds[i] === "string") mirrors.set(i, client.dictionarySync(handle, i));
   }
 
   let disposed = false;
@@ -231,11 +231,7 @@ export function createDataGridStore<S extends SchemaSpec>(
 
   /** Top up every string column's mirror. Cheap when nothing was added. */
   const syncDictionaries = () => {
-    for (const [col, mirror] of mirrors) {
-      const known = mirror.length;
-      if (client.dictLenSync(handle, col) === known) continue;
-      for (const value of client.dictSinceSync(handle, col, known)) mirror.push(value);
-    }
+    for (const col of mirrors.keys()) client.dictionarySync(handle, col);
   };
 
   /**
@@ -257,8 +253,6 @@ export function createDataGridStore<S extends SchemaSpec>(
     if (touchedStrings) syncDictionaries();
     for (const listener of listeners) listener();
   };
-
-  syncDictionaries();
 
   const store: DataGridStore<S> = {
     schema,
@@ -420,7 +414,7 @@ export function createDataGridStore<S extends SchemaSpec>(
 export function makeView<S extends SchemaSpec>(
   schema: DataGridSchema<S>,
   decoded: { start: number; ids: Int32Array; columns: (Int32Array | Float64Array)[] },
-  mirrors: Map<number, string[]>
+  mirrors: ReadonlyMap<number, readonly string[]>
 ): DataGridView<S> {
   const { ids, columns, start } = decoded;
   const length = ids.length;

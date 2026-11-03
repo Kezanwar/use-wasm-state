@@ -191,30 +191,30 @@ under one key are `schema_mismatch`, unless their columns are identical.
 <!-- benchmarks:start -->
 <!-- Generated from benchmarks.json by `pnpm bench`. Edit neither by hand. -->
 
-Median of 15 runs over 200,000 rows, on Apple M2 Pro (10 cores, 16 GB), darwin 24.6.0 arm64, Node v22.23.1, 2026-11-03. Fastest in bold.
+Median of 15 runs over 200,000 rows, on Apple M2 Pro (10 cores, 16 GB), darwin 24.6.0 arm64, Node v22.23.1, 2026-11-03. Best in bold, with anything within 5% of it.
 
 | | Typical JS | Tuned JS | Wasm |
 | --- | ---: | ---: | ---: |
-| Load | 28.2 ms | **14.8 ms** | 54.1 ms |
-| Sort f64 | 109 ms | 51.8 ms | **7.05 ms** |
-| Sort i32 | 59.4 ms | 44.4 ms | **2.39 ms** |
-| Sort string | 263 ms | 59.2 ms | **2.61 ms** |
-| Sort, two keys | 284 ms | 73.1 ms | **7.81 ms** |
-| Filter > | 9.28 ms | **2.28 ms** | 2.47 ms |
-| Filter between | 8.88 ms | 3.01 ms | **1.96 ms** |
-| Filter string = | 9.07 ms | 2.54 ms | **1.74 ms** |
-| Filter string in | 10.6 ms | 3.13 ms | **2.65 ms** |
-| Filter contains | 17.0 ms | 2.78 ms | **1.95 ms** |
-| Search | 26.4 ms | 3.86 ms | **3.41 ms** |
-| Filter + search + sort | 74.4 ms | 23.8 ms | **5.18 ms** |
-| setCell | 183 ns | **111 ns** | 194 ns |
-| setCell, sorted | 157 ms | 52.5 ms | **6.93 ms** |
-| view(50) | **1.58 µs** | 11.4 µs | 13.6 µs |
-| Delete 1,000 rows | 5.46 ms | **376 µs** | 1.62 ms |
-| JS memory after load | 26.1 MB | 8.4 MB | 2.3 MB |
-| Wasm memory after load |  |  | 33.6 MB |
+| Load | 28.6 ms | **15.5 ms** | 21.6 ms |
+| Sort f64 | 113 ms | 50.3 ms | **6.87 ms** |
+| Sort i32 | 57.9 ms | 43.7 ms | **2.31 ms** |
+| Sort string | 246 ms | 58.0 ms | **2.56 ms** |
+| Sort, two keys | 294 ms | 70.9 ms | **7.72 ms** |
+| Filter > | 9.00 ms | **2.38 ms** | **2.40 ms** |
+| Filter between | 8.64 ms | 2.94 ms | **1.94 ms** |
+| Filter string = | 8.62 ms | 2.48 ms | **1.66 ms** |
+| Filter string in | 10.3 ms | 3.20 ms | **2.40 ms** |
+| Filter contains | 17.5 ms | 2.72 ms | **1.91 ms** |
+| Search | 26.2 ms | 3.83 ms | **3.30 ms** |
+| Filter + search + sort | 79.9 ms | 23.8 ms | **5.10 ms** |
+| setCell | 181 ns | **120 ns** | 199 ns |
+| setCell, sorted | 159 ms | 52.2 ms | **6.96 ms** |
+| view(50) | **1.61 µs** | 10.8 µs | 13.1 µs |
+| Delete 1,000 rows | 5.62 ms | **415 µs** | 1.55 ms |
+| JS memory after load | 26.1 MB | 8.4 MB | **2.6 MB** |
+| Wasm memory after load, reserved / live |  |  | 16.8 MB / 8.1 MB |
 
-`datagrid.wasm` is 55,173 bytes. The [Benchmarks tab](https://kezanwar.github.io/use-wasm-state/#benchmarks) runs the same benchmark in your browser, and adds what each costs in frames.
+Typical JS's heap leaves out the strings it shares with the input. `datagrid.wasm` is 57,441 bytes. The [Benchmarks tab](https://kezanwar.github.io/use-wasm-state/#benchmarks) runs the same benchmark in your browser, and adds what each costs in frames.
 <!-- benchmarks:end -->
 
 Wasm's lead is sorting, including the re-sort an edit costs while a sort

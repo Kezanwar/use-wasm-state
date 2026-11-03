@@ -66,6 +66,39 @@ async function loaded(): Promise<{ e: EngineExports; h: number }> {
   return { e, h };
 }
 
+/** Append one row whose string the column already holds. */
+function appendOne(e: EngineExports, h: number, i: number): number {
+  return insertColumns(e, h, [
+    { type: ColumnType.I32, values: [i] },
+    { type: ColumnType.F64, values: [i + 0.5] },
+    { type: ColumnType.String, values: [LABELS[i % LABELS.length]!] },
+  ]);
+}
+
+describe("appends", () => {
+  it("cost microseconds and no memory after a 200k load", async () => {
+    const { e, h } = await loaded();
+    appendOne(e, h, 0);
+
+    const before = e.memory.buffer.byteLength;
+    const times: number[] = [];
+    for (let i = 0; i < 5000; i++) {
+      const started = performance.now();
+      appendOne(e, h, i);
+      times.push(performance.now() - started);
+    }
+    times.sort((a, b) => a - b);
+    const median = times[times.length >> 1]!;
+    console.log(`  appends: ${(median * 1000).toFixed(1)}us median per row after a 200k load`);
+
+    expect(e.memory.buffer.byteLength).toBe(before);
+    expect(e.totalRows(h)).toBe(ROWS + 5001);
+    expect(readView(e, h, ROWS + 5000, 1, SCHEMA)!.columns[0]![0]).toBe(4999);
+    // Copying the columns, as every append once did, is milliseconds.
+    expect(median).toBeLessThan(0.1);
+  });
+});
+
 describe("steady state", () => {
   it("does not grow at all across 10k mixed operations", async () => {
     const { e, h } = await loaded();
@@ -77,6 +110,9 @@ describe("steady state", () => {
     readDictSince(e, h, 2, 0);
     setCellString(e, h, 0, 2, LABELS[0]!);
     deleteRows(e, h, [ROWS - 1]);
+    // The first append after a load doubles every column's capacity; the
+    // appends in the loop must then cost nothing.
+    appendOne(e, h, 0);
 
     const before = e.memory.buffer.byteLength;
     let liveRows = e.rowCount(h);
@@ -106,11 +142,15 @@ describe("steady state", () => {
         }
         case 4:
           readDictSince(e, h, 2, i % 3);
+          // An append of a label the column already holds: new row, no
+          // new string, so nothing may reach the heap beyond capacity.
+          expect(appendOne(e, h, i)).toBe(e.totalRows(h) - 1);
+          liveRows++;
           break;
       }
 
-      // A small delete batch every so often, from the far end so the edits
-      // above keep landing on live rows.
+      // A small delete batch every so often, from the far end of the load
+      // so the edits above keep landing on live rows.
       if (i % 500 === 499) {
         const doomed = Int32Array.from({ length: 8 }, (_, k) => ROWS - 2 - nextDoomed - k * 3);
         nextDoomed += 32;
@@ -204,8 +244,8 @@ describe("steady state", () => {
     // Reusing an existing dictionary entry must cost nothing at all.
     expect(repeatedGrowth).toBe(0);
     // New entries are new data and may cost something, but only what the
-    // data is worth. In practice both report zero, because 20k short
-    // strings still fit in pages the module reserved during the load.
+    // data is worth: at most one doubling of a load that left little
+    // headroom, never growth for every edit.
     expect(freshGrowth).toBeLessThanOrEqual(repeatedBefore);
 
     // What separates the two runs is visible in the dictionary rather than
