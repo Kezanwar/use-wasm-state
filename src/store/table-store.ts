@@ -104,6 +104,15 @@ export interface TableReader<S extends SchemaSpec = SchemaSpec> {
    * re-render to look at it. This is what useSyncExternalStore snapshots.
    */
   readonly version: number;
+  /**
+   * How long the last engine call took, in milliseconds.
+   *
+   * The engine's time only: in worker mode it is the round trip, measured
+   * before anything re-renders. A caller timing the call itself would
+   * fold in React's work on whatever changed, which is not what anyone
+   * putting a number on screen is trying to show.
+   */
+  readonly lastCallMs: number;
   /** Bumped by every mutation that changed something. */
   readonly revision: number;
   /** Live rows. */
@@ -344,6 +353,10 @@ export function createTableStore<S extends SchemaSpec>(
     get version() {
       alive("version");
       return version;
+    },
+    get lastCallMs() {
+      alive("lastCallMs");
+      return client.lastCallMs;
     },
     get revision() {
       alive("revision");

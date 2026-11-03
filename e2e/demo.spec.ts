@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import { cell, MODES, ready, rowCount } from "./helpers";
+import { cell, MODES, PROD, ready, rowCount } from "./helpers";
 
 /**
  * The browser is the only place the real thing runs: 200k rows in wasm, a
@@ -92,20 +92,12 @@ for (const mode of MODES) {
   });
 
   test(`${mode}: keeps its frame rate while scrolling`, async ({ page }) => {
-    await ready(page, mode);
+    // The production build, because React's development build carries
+    // checks that production does not and a budget set against it would
+    // be measuring the wrong thing.
+    await ready(page, mode, PROD);
 
-    const { longest, longestFrame, frames } = await page.evaluate(async () => {
-      const tasks: number[] = [];
-      let observer: PerformanceObserver | null = null;
-      try {
-        observer = new PerformanceObserver((list) => {
-          for (const entry of list.getEntries()) tasks.push(entry.duration);
-        });
-        observer.observe({ entryTypes: ["longtask"] });
-      } catch {
-        // Not every engine ships longtask.
-      }
-
+    const { longestFrame, medianFrame, frames } = await page.evaluate(async () => {
       const grid = document.querySelector('[data-testid="grid"]') as HTMLElement;
       const intervals: number[] = [];
       let previous = performance.now();
@@ -118,30 +110,104 @@ for (const mode of MODES) {
         previous = now;
       }
 
-      await new Promise((resolve) => setTimeout(resolve, 200));
-      observer?.disconnect();
-
+      // The first interval includes getting into the loop.
+      const sorted = [...intervals.slice(1)].sort((a, b) => a - b);
       return {
-        longest: tasks.length ? Math.max(...tasks) : 0,
-        // The first interval includes getting into the loop.
-        longestFrame: Math.max(...intervals.slice(1)),
+        longestFrame: sorted.at(-1)!,
+        medianFrame: sorted[Math.floor(sorted.length / 2)]!,
         frames: intervals.length,
       };
     });
 
     console.log(
-      `${mode} scroll: ${frames} frames, longest frame ${longestFrame.toFixed(1)}ms, ` +
-        `longest task ${longest.toFixed(1)}ms`
+      `${mode} scroll: ${frames} frames, median ${medianFrame.toFixed(1)}ms, ` +
+        `longest ${longestFrame.toFixed(1)}ms`
     );
 
-    expect(longest).toBeLessThan(50);
-    expect(longestFrame).toBeLessThan(50);
+    // A rAF interval cannot go below the display's refresh, so a median at
+    // 16.7ms means nothing is being dropped at all.
+    expect(medianFrame).toBeLessThan(17);
+    expect(longestFrame).toBeLessThan(25);
     await expect(page.locator('[role="row"]').first()).toBeVisible();
+  });
+
+  test(`${mode}: typing in the search box drops no frames`, async ({ page }) => {
+    await ready(page, mode, PROD);
+
+    const { first, longest, median } = await page.evaluate(async () => {
+      const search = document.querySelector('[data-testid="search"]') as HTMLInputElement;
+      const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
+
+      const intervals: number[] = [];
+      let previous = performance.now();
+      for (const text of ["s", "sh", "shi", "ship", "shipp", "shippe", "shipped", ""]) {
+        setValue.call(search, text);
+        search.dispatchEvent(new Event("input", { bubbles: true }));
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+        const now = performance.now();
+        intervals.push(now - previous);
+        previous = now;
+      }
+
+      const sorted = [...intervals].sort((a, b) => a - b);
+      return {
+        first: intervals[0]!,
+        longest: sorted.at(-1)!,
+        median: sorted[Math.floor(sorted.length / 2)]!,
+      };
+    });
+
+    console.log(
+      `${mode} search: first ${first.toFixed(1)}ms, median ${median.toFixed(1)}ms, ` +
+        `longest ${longest.toFixed(1)}ms`
+    );
+
+    expect(median).toBeLessThan(17);
+    expect(longest).toBeLessThan(28);
   });
 }
 
+test("worker: rows are drawn at the offset they claim", async ({ page }) => {
+  await ready(page, "worker", PROD);
+
+  // In worker mode a window arrives a round trip late, so the rows on
+  // screen can be the previous window drawn at its own start. Everything
+  // the grid does with an offset has to agree with where it drew them, or
+  // a click lands on the wrong row.
+  const mismatches = await page.evaluate(async () => {
+    const grid = document.querySelector('[data-testid="grid"]') as HTMLElement;
+    const wrong: string[] = [];
+
+    for (let i = 0; i < 40; i++) {
+      grid.scrollTop = (i * 97_000) % grid.scrollHeight;
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+
+      const rows = [...document.querySelectorAll("[data-row]")] as HTMLElement[];
+      if (rows.length === 0) continue;
+
+      // Where the rows were actually painted, from the transform.
+      const shifted = rows[0]!.parentElement as HTMLElement;
+      const transform = shifted.style.transform;
+      // Anything up to the "px": React writes large offsets in scientific
+      // notation, which CSS accepts and a digits-only pattern does not.
+      const drawnAt = Math.round(
+        Number(/translateY\(([^p]+)px\)/.exec(transform)?.[1] ?? "NaN") / 32
+      );
+      // Every row is one slot below the one before it, and the first sits
+      // exactly where the transform puts it.
+      const contiguous = rows.every((row, at) => Number(row.dataset.row) === drawnAt + at);
+      if (Number(rows[0]!.dataset.row) !== drawnAt || !contiguous) {
+        wrong.push(`row0=${rows[0]!.dataset.row} drawnAt=${drawnAt} transform="${transform}"`);
+      }
+    }
+    return wrong;
+  });
+
+  expect(mismatches).toEqual([]);
+});
+
 test("worker: a fast scroll never blanks the grid", async ({ page }) => {
-  await ready(page, "worker");
+  await ready(page, "worker", PROD);
 
   // A worker answers a window a round trip later. Rather than showing
   // nothing, the grid draws the nearest rows it has at their real offset,
@@ -161,7 +227,7 @@ test("worker: a fast scroll never blanks the grid", async ({ page }) => {
 });
 
 test("worker: a sort on 200k rows keeps the frames coming", async ({ page }) => {
-  await ready(page, "worker");
+  await ready(page, "worker", PROD);
 
   const { longest, longestFrame, medianFrame } = await page.evaluate(async () => {
     const tasks: number[] = [];
@@ -208,12 +274,12 @@ test("worker: a sort on 200k rows keeps the frames coming", async ({ page }) => 
   );
 
   expect(longest).toBeLessThan(50);
-  // The median is the claim: the page keeps painting while 200k rows are
-  // sorted off-thread. The frame each sort lands on is allowed to cost
-  // more, because every visible row changes and React re-renders them all;
-  // what must not happen is the page stopping.
-  expect(medianFrame).toBeLessThan(20);
-  expect(longestFrame).toBeLessThan(100);
+  // The median is the claim: the page keeps painting at the display's
+  // refresh while 200k rows are sorted off-thread. The frame each sort
+  // lands on costs more, because every visible row changes and React
+  // re-renders all of them.
+  expect(medianFrame).toBeLessThan(17);
+  expect(longestFrame).toBeLessThan(32);
 });
 
 test("switching modes keeps the rows and the query", async ({ page }) => {

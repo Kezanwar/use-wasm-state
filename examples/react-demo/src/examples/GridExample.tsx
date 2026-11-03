@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Profiler, useCallback, useEffect, useRef, useState } from "react";
 import { useTableQuery, useTableStats, useWasmTable, type TableQuery } from "use-wasm-state";
 import { Grid, selectionRange, type AnyTable } from "@/components/Grid";
 import { StatusBar } from "@/components/StatusBar";
 import { Toolbar } from "@/components/Toolbar";
-import { useFrameRate } from "@/hooks/useFrameRate";
+import { onRenderCommit } from "@/lib/profile";
 import { generateOrders, schema, STATUSES } from "@/lib/orders";
 
 const INITIAL_ROWS = 200_000;
@@ -59,25 +59,29 @@ function Surface({
   const { status, table, error } = useWasmTable(schema, { mode });
   const stats = useTableStats(table);
   const query = useTableQuery(table);
-  const fps = useFrameRate();
 
   const [selection, setSelection] = useState<{ anchor: number; focus: number } | null>(null);
   const [lastMs, setLastMs] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const loaded = useRef(false);
 
-  /** Run a store call and report what it cost. */
-  const timed = useCallback(<T,>(run: () => T): T => {
-    const started = performance.now();
-    const result = run();
-    // A worker call resolves later, so the clock stops when it does.
-    if (result instanceof Promise) {
-      void result.finally(() => setLastMs(performance.now() - started));
-    } else {
-      setLastMs(performance.now() - started);
-    }
-    return result;
-  }, []);
+  /**
+   * Run a store call and show what the engine cost.
+   *
+   * The number comes from the store, not from a clock around the call: in
+   * worker mode that would include React re-rendering whatever came back,
+   * which is this component's time and not the engine's.
+   */
+  const timed = useCallback(
+    <T,>(run: () => T): T => {
+      const result = run();
+      const report = () => setLastMs(table?.lastCallMs ?? null);
+      if (result instanceof Promise) void result.finally(report);
+      else report();
+      return result;
+    },
+    [table]
+  );
 
   // Not initialRows, because generating the dataset is the slow part and
   // the status bar should show the insert on its own.
@@ -160,51 +164,54 @@ function Surface({
     : 0;
 
   return (
-    <div className="flex h-[32rem] flex-col overflow-hidden rounded-xl border">
-      <Toolbar
-        mode={mode}
-        onMode={onMode}
-        selectedCount={selectedCount}
-        search={query?.search ?? ""}
-        statuses={statuses}
-        onSearch={(text) => {
-          if (!table) return;
-          timed(() => table.search(text));
-          setSelection(null);
-        }}
-        onToggleStatus={(status) =>
-          setStatuses(
-            statuses.includes(status) ? statuses.filter((s) => s !== status) : [...statuses, status]
-          )
-        }
-        onAppend={append}
-        onDelete={() => void remove()}
-        busy={busy || status !== "ready"}
-      />
-
-      {status === "ready" && stats ? (
-        <Grid
-          table={table as AnyTable}
-          rowCount={stats.rowCount}
-          overscan={OVERSCAN[mode]}
-          selection={selection}
-          onSelectionChange={setSelection}
-          onEdit={timed}
-          onSort={(run) => {
-            timed(run);
+    <Profiler id="grid" onRender={onRenderCommit}>
+      <div className="flex h-[32rem] flex-col overflow-hidden rounded-xl border">
+        <Toolbar
+          mode={mode}
+          onMode={onMode}
+          selectedCount={selectedCount}
+          search={query?.search ?? ""}
+          statuses={statuses}
+          onSearch={(text) => {
+            if (!table) return;
+            timed(() => table.search(text));
             setSelection(null);
           }}
+          onToggleStatus={(status) =>
+            setStatuses(
+              statuses.includes(status)
+                ? statuses.filter((s) => s !== status)
+                : [...statuses, status]
+            )
+          }
+          onAppend={append}
+          onDelete={() => void remove()}
+          busy={busy || status !== "ready"}
         />
-      ) : (
-        <div className="bg-muted/30 flex-1 animate-pulse" />
-      )}
 
-      <StatusBar
-        rowCount={stats?.rowCount ?? 0}
-        revision={stats?.revision ?? 0}
-        fps={fps}
-        lastMs={lastMs}
-      />
-    </div>
+        {status === "ready" && stats ? (
+          <Grid
+            table={table as AnyTable}
+            rowCount={stats.rowCount}
+            overscan={OVERSCAN[mode]}
+            selection={selection}
+            onSelectionChange={setSelection}
+            onEdit={timed}
+            onSort={(run) => {
+              timed(run);
+              setSelection(null);
+            }}
+          />
+        ) : (
+          <div className="bg-muted/30 flex-1 animate-pulse" />
+        )}
+
+        <StatusBar
+          rowCount={stats?.rowCount ?? 0}
+          revision={stats?.revision ?? 0}
+          lastMs={lastMs}
+        />
+      </div>
+    </Profiler>
   );
 }

@@ -27,7 +27,16 @@ export type ColumnValues =
 /** A cell value, matching its column's type. */
 export type CellValue = number | string;
 
-export interface EngineClient {
+/**
+ * What any transport can do: change a table.
+ *
+ * Split from the reads because a worker transport has none of them. Its
+ * store never asks "what is the row count" — every reply already carries
+ * it, along with the rows for whatever is on screen. Leaving the reads on
+ * one interface would have the worker client implementing methods nothing
+ * calls, which is a worse lie than a second name.
+ */
+export interface EngineMutations {
   /** Create a table and return its handle. */
   createTable(schema: readonly ColumnSpec[]): Promise<number>;
   dropTable(handle: number): Promise<void>;
@@ -59,6 +68,18 @@ export interface EngineClient {
    */
   setQuery(handle: number, query: WireQuery): Promise<void>;
 
+  /** Release the client. Later calls throw. */
+  dispose(): void;
+
+  /** How long the last call took, engine only. */
+  readonly lastCallMs: number;
+}
+
+/**
+ * Reads a caller has to ask for, which only a same-thread engine can
+ * answer without waiting. The worker sends them unasked.
+ */
+export interface EngineReads {
   /** Read one window. The schema is needed to decode the columns. */
   view(
     handle: number,
@@ -66,16 +87,16 @@ export interface EngineClient {
     count: number,
     schema: readonly ColumnSpec[]
   ): Promise<DecodedView>;
+
   /** Dictionary entries added at or after `from`. */
   dictSince(handle: number, col: number, from: number): Promise<string[]>;
 
   revision(handle: number): Promise<number>;
   rowCount(handle: number): Promise<number>;
   totalRows(handle: number): Promise<number>;
-
-  /** Release the client. Later calls throw. */
-  dispose(): void;
 }
+
+export interface EngineClient extends EngineMutations, EngineReads {}
 
 /**
  * The main-thread client, which can also answer reads without a microtask.

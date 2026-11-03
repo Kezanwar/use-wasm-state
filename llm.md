@@ -180,6 +180,8 @@ clearQuery(): void
 readonly query: Required<TableQuery<S>>
 
 readonly revision: number
+readonly version: number     // subscription token; moves on any visible change
+readonly lastCallMs: number  // what the last engine call cost, engine time only
 readonly rowCount: number    // live rows
 readonly totalRows: number   // including tombstones
 
@@ -224,6 +226,10 @@ rows(): Row<S>[]
 - **Load once, then query.** The data stays in Go.
 - **Never cache a typed-array view on `memory.buffer`.** A grow detaches it.
 - **Row ids, not offsets.** Offsets shift when rows are deleted.
+- **Key virtualised rows by their slot, not their row id.** A sort or a
+  filter changes every visible id, and id keys make React destroy and
+  rebuild every cell. Keep the id on the element for tests. Id keys are
+  right for a list that is not virtualised, where a row keeps its identity.
 - **Windows are clamped, never rejected.** Read `view.start` to find out
   where a window actually begins.
 

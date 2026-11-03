@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { cn } from "cn";
 import {
@@ -124,12 +124,41 @@ export function Grid({ table, rowCount, selection, onSelectionChange, onEdit, on
     event.preventDefault();
   };
 
-  const select = (row: number, extend: boolean) => {
-    onSelectionChange(
-      extend && selection ? { anchor: selection.anchor, focus: row } : { anchor: row, focus: row }
+  /**
+   * Stable callbacks, so a memoised row keeps its memo.
+   *
+   * Each one takes the row it acts on as an argument rather than closing
+   * over it, and reads mutable state through a ref. A handler rebuilt per
+   * row per render would make every row's props new every time, and the
+   * memoisation above would buy nothing.
+   */
+  const latest = useRef({ table, selection, onEdit, onSelectionChange });
+  latest.current = { table, selection, onEdit, onSelectionChange };
+
+  const select = useCallback((offset: number, extend: boolean) => {
+    const { selection: current, onSelectionChange: change } = latest.current;
+    change(
+      extend && current
+        ? { anchor: current.anchor, focus: offset }
+        : { anchor: offset, focus: offset }
     );
-    setCursor((c) => ({ ...c, row }));
-  };
+    setCursor((c) => ({ ...c, row: offset }));
+  }, []);
+
+  const activate = useCallback((offset: number, col: number) => {
+    setCursor({ row: offset, col });
+    setEditing(true);
+  }, []);
+
+  const commit = useCallback((rowId: number, col: number, value: string | number) => {
+    setEditing(false);
+    const { table: store, onEdit: measure } = latest.current;
+    // Measured by the caller, so the status bar shows what the engine
+    // cost rather than what React did afterwards.
+    measure(() => store.setCell(rowId, COLUMNS[col]!.key, value as never));
+  }, []);
+
+  const cancel = useCallback(() => setEditing(false), []);
 
   const selected = selection ? selectionRange(selection) : null;
 
@@ -188,50 +217,22 @@ export function Grid({ table, rowCount, selection, onSelectionChange, onEdit, on
         <div style={{ transform: `translateY(${(view?.start ?? window.start) * ROW_HEIGHT}px)` }}>
           {view?.ids.length
             ? Array.from({ length: view.length }, (_, i) => {
-                const row = window.start + i;
+                const offset = view.start + i;
                 const rowId = view.ids[i]!;
                 return (
-                  <div
-                    key={rowId}
-                    role="row"
-                    data-row={row}
-                    className={cn(
-                      "grid border-b border-border/40 text-sm tabular",
-                      selected && row >= selected.from && row <= selected.to && "bg-accent"
-                    )}
-                    style={{ gridTemplateColumns: TEMPLATE, height: ROW_HEIGHT }}
-                    onMouseDown={(event) => select(row, event.shiftKey)}
-                  >
-                    {COLUMNS.map((column, col) => {
-                      const value = view.get(i, column.key);
-                      const format = "format" in column ? column.format : undefined;
-                      const isCursor = cursor.row === row && cursor.col === col;
-                      return (
-                        <Cell
-                          key={column.key}
-                          align={column.align}
-                          active={isCursor}
-                          editing={isCursor && editing}
-                          value={value}
-                          display={
-                            format ? (format as (v: unknown) => string)(value) : String(value)
-                          }
-                          onActivate={() => {
-                            setCursor({ row, col });
-                            setEditing(true);
-                          }}
-                          onCommit={(next) => {
-                            setEditing(false);
-                            // Measured by the caller, so the status bar can
-                            // show what the engine cost rather than what
-                            // React did afterwards.
-                            onEdit(() => table.setCell(rowId, column.key, next as never));
-                          }}
-                          onCancel={() => setEditing(false)}
-                        />
-                      );
-                    })}
-                  </div>
+                  <Row
+                    key={i}
+                    offset={offset}
+                    rowId={rowId}
+                    values={COLUMNS.map((column) => view.get(i, column.key))}
+                    selected={selected !== null && offset >= selected.from && offset <= selected.to}
+                    cursorCol={cursor.row === offset ? cursor.col : -1}
+                    editing={cursor.row === offset && editing}
+                    onSelect={select}
+                    onActivate={activate}
+                    onCommit={commit}
+                    onCancel={cancel}
+                  />
                 );
               })
             : null}
@@ -241,23 +242,109 @@ export function Grid({ table, rowCount, selection, onSelectionChange, onEdit, on
   );
 }
 
+interface RowProps {
+  /** Offset into the live order, which is what selection and the cursor use. */
+  offset: number;
+  rowId: number;
+  values: readonly (string | number)[];
+  selected: boolean;
+  /** The column the cursor is on, or -1 when it is on another row. */
+  cursorCol: number;
+  editing: boolean;
+  onSelect: (offset: number, extend: boolean) => void;
+  onActivate: (offset: number, col: number) => void;
+  onCommit: (rowId: number, col: number, value: string | number) => void;
+  onCancel: () => void;
+}
+
+/**
+ * One row, memoised on its values.
+ *
+ * Every prop is a primitive or a stable callback, so a render of the grid
+ * only reaches the rows whose data actually changed. `values` is a fresh
+ * array each time, which is why the comparison below walks it: comparing
+ * the arrays by identity would make the memo useless, and leaving the memo
+ * off would re-render forty rows for a scroll of one.
+ */
+const Row = memo(
+  function Row({
+    offset,
+    rowId,
+    values,
+    selected,
+    cursorCol,
+    editing,
+    onSelect,
+    onActivate,
+    onCommit,
+    onCancel,
+  }: RowProps) {
+    return (
+      <div
+        role="row"
+        data-row={offset}
+        data-id={rowId}
+        className={cn("grid border-b border-border/40 text-sm tabular", selected && "bg-accent")}
+        style={{ gridTemplateColumns: TEMPLATE, height: ROW_HEIGHT }}
+        onMouseDown={(event) => onSelect(offset, event.shiftKey)}
+      >
+        {COLUMNS.map((column, col) => {
+          const format = "format" in column ? column.format : undefined;
+          const value = values[col]!;
+          return (
+            <Cell
+              key={column.key}
+              col={col}
+              align={column.align}
+              active={cursorCol === col}
+              editing={editing && cursorCol === col}
+              value={value}
+              display={format ? (format as (v: unknown) => string)(value) : String(value)}
+              rowId={rowId}
+              offset={offset}
+              onActivate={onActivate}
+              onCommit={onCommit}
+              onCancel={onCancel}
+            />
+          );
+        })}
+      </div>
+    );
+  },
+  (a, b) =>
+    a.offset === b.offset &&
+    a.rowId === b.rowId &&
+    a.selected === b.selected &&
+    a.cursorCol === b.cursorCol &&
+    a.editing === b.editing &&
+    a.values.length === b.values.length &&
+    a.values.every((value, i) => value === b.values[i])
+);
+
 interface CellProps {
+  col: number;
   align: "left" | "right";
   active: boolean;
   editing: boolean;
   value: string | number;
   display: string;
-  onActivate: () => void;
-  onCommit: (value: string | number) => void;
+  rowId: number;
+  offset: number;
+  onActivate: (offset: number, col: number) => void;
+  onCommit: (rowId: number, col: number, value: string | number) => void;
   onCancel: () => void;
 }
 
-function Cell({
+/** Memoised for the same reason as Row: a cursor move touches two cells. */
+const Cell = memo(function Cell({
+  col,
   align,
   active,
   editing,
   value,
   display,
+  rowId,
+  offset,
   onActivate,
   onCommit,
   onCancel,
@@ -269,11 +356,16 @@ function Cell({
   }, [editing]);
 
   if (editing) {
-    const numeric = typeof value === "number";
+    const commit = (next: string) => {
+      const parsed = typeof value === "number" ? Number(next) : next;
+      if (typeof parsed === "number" && Number.isNaN(parsed)) onCancel();
+      else onCommit(rowId, col, parsed);
+    };
+
     return (
       <input
         ref={input}
-        type={numeric ? "number" : "text"}
+        type={typeof value === "number" ? "number" : "text"}
         step="any"
         defaultValue={String(value)}
         data-testid="cell-editor"
@@ -288,12 +380,6 @@ function Cell({
         }}
       />
     );
-
-    function commit(next: string) {
-      const parsed = typeof value === "number" ? Number(next) : next;
-      if (typeof parsed === "number" && Number.isNaN(parsed)) onCancel();
-      else onCommit(parsed);
-    }
   }
 
   return (
@@ -304,12 +390,12 @@ function Cell({
         align === "right" && "text-right",
         active && "ring-2 ring-inset ring-ring"
       )}
-      onDoubleClick={onActivate}
+      onDoubleClick={() => onActivate(offset, col)}
     >
       {display}
     </div>
   );
-}
+});
 
 /**
  * Click a header to sort: ascending, then descending, then off. Shift-click

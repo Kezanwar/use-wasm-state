@@ -250,6 +250,7 @@ export function ApiPage() {
           <Fields
             rows={[
               ["version", "The subscription token. Moves whenever any read could now differ."],
+              ["lastCallMs", "What the last engine call cost. The round trip in worker mode."],
               ["view", "Best-effort. In worker mode, the nearest rows it has rather than nothing."],
               ["readWindow", "The real rows, waited for. What an edit over off-screen rows needs."],
               [

@@ -70,8 +70,10 @@ const view = useTableView(table, Math.floor(scrollTop / 32), 50);
 table.setCell(rowId, "price", 12.5);
 ```
 
-Row ids are permanent positions, so they are stable React keys. A delete
-writes a tombstone and nothing moves.
+Row ids are permanent positions, so a row keeps its identity across edits
+and deletes. In a plain list they are the React key. In a virtualised grid,
+key by the slot instead and keep the id as a `data-id`: a sort changes
+every visible id, and id keys would make React rebuild every cell.
 
 ## Sort, filter and search
 

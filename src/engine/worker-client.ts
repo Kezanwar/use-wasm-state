@@ -10,8 +10,8 @@
  * Internal. Not exported from src/index.ts.
  */
 
-import type { ColumnSpec, DecodedView, WireQuery } from "./abi";
-import type { CellValue, ColumnKind, ColumnValues, EngineClient } from "./client";
+import type { ColumnSpec, WireQuery } from "./abi";
+import type { CellValue, ColumnKind, ColumnValues, EngineMutations } from "./client";
 import { disposedError, WasmStateError, type WasmStateErrorCode } from "./errors";
 import type { Reply, Request, RequestBody, TableUpdate, WindowSpec } from "./protocol";
 /**
@@ -41,7 +41,7 @@ interface Pending {
   reject: (reason: Error) => void;
 }
 
-export class WorkerClient implements EngineClient {
+export class WorkerClient implements EngineMutations {
   readonly mode = "worker" as const;
 
   #worker: Worker | null;
@@ -51,6 +51,16 @@ export class WorkerClient implements EngineClient {
   /** Which windows each table wants kept fresh, set by its store. */
   #windows = new Map<number, readonly WindowSpec[]>();
   #opened: Promise<void>;
+
+  /**
+   * The round trip the last call took: postMessage to reply received,
+   * before any subscriber is notified.
+   *
+   * What a status bar should show. Measuring from a caller would fold in
+   * React's render of whatever the reply changed, which is not the
+   * engine's time and not what anyone is trying to read.
+   */
+  lastCallMs = 0;
 
   constructor(options: WorkerClientOptions) {
     const worker = new Worker(options.workerUrl ?? defaultWorkerUrl(), { type: "module" });
@@ -102,8 +112,15 @@ export class WorkerClient implements EngineClient {
     const id = this.#nextId++;
     const message = { ...request, id } as Request;
 
+    const started = performance.now();
     return new Promise<Reply>((resolve, reject) => {
-      this.#pending.set(id, { resolve, reject });
+      this.#pending.set(id, {
+        resolve: (reply) => {
+          this.lastCallMs = performance.now() - started;
+          resolve(reply);
+        },
+        reject,
+      });
       try {
         worker.postMessage(message, transfer ?? []);
       } catch (err) {
@@ -237,41 +254,5 @@ export class WorkerClient implements EngineClient {
       windows: windows ?? this.#windowsFor(handle),
     });
     this.#publish(handle, reply);
-  }
-
-  async view(
-    handle: number,
-    start: number,
-    count: number,
-    _schema: readonly ColumnSpec[]
-  ): Promise<DecodedView> {
-    const reply = await this.#send({ op: "read", handle, windows: [{ start, count }] });
-    this.#publish(handle, reply);
-    const update = (reply as { update: TableUpdate }).update;
-    return update.windows[0]!.view;
-  }
-
-  async dictSince(handle: number, col: number, _from: number): Promise<string[]> {
-    // Deltas ride along with every update, so this exists to satisfy
-    // EngineClient rather than because the worker store calls it.
-    const reply = await this.#send({ op: "read", handle, windows: [] });
-    const update = (reply as { update: TableUpdate }).update;
-    return update.dictionaries[col] ?? [];
-  }
-
-  async revision(handle: number): Promise<number> {
-    return (await this.#stats(handle)).revision;
-  }
-  async rowCount(handle: number): Promise<number> {
-    return (await this.#stats(handle)).rowCount;
-  }
-  async totalRows(handle: number): Promise<number> {
-    return (await this.#stats(handle)).totalRows;
-  }
-
-  async #stats(handle: number): Promise<TableUpdate> {
-    const reply = await this.#send({ op: "read", handle, windows: [] });
-    this.#publish(handle, reply);
-    return (reply as { update: TableUpdate }).update;
   }
 }

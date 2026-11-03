@@ -69,6 +69,8 @@ export function createAsyncTableStore<S extends SchemaSpec>(
 
   let disposed = false;
   let version = 0;
+  // Captured when the reply lands, before anything re-renders.
+  let lastCallMs = 0;
   let handle = -1;
   let revision = 0;
   let rowCount = 0;
@@ -160,6 +162,7 @@ export function createAsyncTableStore<S extends SchemaSpec>(
       }
     }
 
+    lastCallMs = client.lastCallMs;
     if (!touched) return;
     version++;
     for (const listener of listeners) listener();
@@ -284,6 +287,10 @@ export function createAsyncTableStore<S extends SchemaSpec>(
     get version() {
       alive("version");
       return version;
+    },
+    get lastCallMs() {
+      alive("lastCallMs");
+      return lastCallMs;
     },
     get revision() {
       alive("revision");

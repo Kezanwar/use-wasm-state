@@ -32,8 +32,27 @@ export class SyncClient implements SyncEngineClient {
 
   #exports: EngineExports | null;
 
+  /**
+   * How long the last call spent in the engine.
+   *
+   * Set here rather than measured by a caller, so what a status bar shows
+   * is the engine's time and never React's. In worker mode the same
+   * number is the round trip; see WorkerClient.
+   */
+  lastCallMs = 0;
+
   constructor(exports: EngineExports) {
     this.#exports = exports;
+  }
+
+  /** Run a call and record what it cost. */
+  #timed<T>(run: () => T): T {
+    const started = performance.now();
+    try {
+      return run();
+    } finally {
+      this.lastCallMs = performance.now() - started;
+    }
   }
 
   #e(op: string): EngineExports {
@@ -55,9 +74,11 @@ export class SyncClient implements SyncEngineClient {
   createTableSync(schema: readonly ColumnSpec[]): number {
     const e = this.#e("createTable");
     const bytes = encodeSchema(schema);
-    return WasmStateError.check(
-      withInput(e, [bytesIn(bytes)], ([s]) => e.createTable(s.ptr, s.len)),
-      "createTable"
+    return this.#timed(() =>
+      WasmStateError.check(
+        withInput(e, [bytesIn(bytes)], ([s]) => e.createTable(s.ptr, s.len)),
+        "createTable"
+      )
     );
   }
 
@@ -95,15 +116,17 @@ export class SyncClient implements SyncEngineClient {
     const descIndex = args.length;
     args.push(u32In(new Uint32Array(columns.length * 4)));
 
-    const status = withInput(e, args, (blocks) => {
-      const descs = new Uint32Array(e.memory.buffer, blocks[descIndex]!.ptr, columns.length * 4);
-      for (let i = 0; i < columns.length; i++) {
-        const { data, offsets, rows } = layout[i]!;
-        const d = blocks[data]!;
-        descs.set([d.ptr, d.len, offsets === -1 ? 0 : blocks[offsets]!.ptr, rows], i * 4);
-      }
-      return e.insertColumns(handle, blocks[descIndex]!.ptr, columns.length);
-    });
+    const status = this.#timed(() =>
+      withInput(e, args, (blocks) => {
+        const descs = new Uint32Array(e.memory.buffer, blocks[descIndex]!.ptr, columns.length * 4);
+        for (let i = 0; i < columns.length; i++) {
+          const { data, offsets, rows } = layout[i]!;
+          const d = blocks[data]!;
+          descs.set([d.ptr, d.len, offsets === -1 ? 0 : blocks[offsets]!.ptr, rows], i * 4);
+        }
+        return e.insertColumns(handle, blocks[descIndex]!.ptr, columns.length);
+      })
+    );
 
     return WasmStateError.check(status, "insertColumns");
   }
@@ -120,14 +143,15 @@ export class SyncClient implements SyncEngineClient {
     // Which setter to use comes from the schema, never from the value:
     // 1 is a valid i32 and a valid f64, and guessing would truncate a
     // float column on its first whole number.
-    const status =
+    const status = this.#timed(() =>
       kind === "string"
         ? withInput(e, [stringIn(String(value))], ([text]) =>
             e.setCellString(handle, rowId, col, text.ptr, text.len)
           )
         : kind === "f64"
           ? e.setCellF64(handle, rowId, col, value as number)
-          : e.setCellI32(handle, rowId, col, value as number);
+          : e.setCellI32(handle, rowId, col, value as number)
+    );
 
     WasmStateError.check(status, "setCell");
   }
@@ -135,7 +159,9 @@ export class SyncClient implements SyncEngineClient {
   deleteRowsSync(handle: number, rowIds: ArrayLike<number>): void {
     const e = this.#e("deleteRows");
     WasmStateError.check(
-      withInput(e, [i32In(rowIds)], ([ids]) => e.deleteRows(handle, ids.ptr, ids.len)),
+      this.#timed(() =>
+        withInput(e, [i32In(rowIds)], ([ids]) => e.deleteRows(handle, ids.ptr, ids.len))
+      ),
       "deleteRows"
     );
   }
@@ -144,7 +170,7 @@ export class SyncClient implements SyncEngineClient {
     const e = this.#e("setQuery");
     const bytes = encodeQuery(query);
     WasmStateError.check(
-      withInput(e, [bytesIn(bytes)], ([q]) => e.setQuery(handle, q.ptr, q.len)),
+      this.#timed(() => withInput(e, [bytesIn(bytes)], ([q]) => e.setQuery(handle, q.ptr, q.len))),
       "setQuery"
     );
   }

@@ -143,6 +143,7 @@ defineSchema({ id: "i32", name: "string", price: "f64" });`,
   TableReader: `interface TableReader<S extends SchemaSpec> {
   readonly schema: TableSchema<S>;
   readonly version: number;
+  readonly lastCallMs: number;
   readonly revision: number;
   readonly rowCount: number;
   readonly totalRows: number;

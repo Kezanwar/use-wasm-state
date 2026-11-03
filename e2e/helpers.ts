@@ -5,13 +5,22 @@ export const MODES = ["sync", "worker"] as const;
 export type Mode = (typeof MODES)[number];
 
 /**
+ * The production build, served the way Pages serves it.
+ *
+ * Frame budgets are measured here, not against the dev server: React's
+ * development build carries checks that production does not, and a budget
+ * set against it would be measuring the wrong thing.
+ */
+export const PROD = "http://localhost:4178/use-wasm-state/";
+
+/**
  * Open the Examples tab with the grid loaded in a given mode.
  *
  * Worker mode is reached through the toolbar switch rather than a URL, so
  * the test exercises the same path a visitor does.
  */
-export async function ready(page: Page, mode: Mode = "sync") {
-  await page.goto("/#examples");
+export async function ready(page: Page, mode: Mode = "sync", base = "/") {
+  await page.goto(`${base}#examples`);
   await expect(page.getByTestId("row-count")).toHaveText("200,000", { timeout: 60_000 });
 
   if (mode === "worker") {
