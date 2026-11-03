@@ -11,6 +11,11 @@ package table
 // is a known v1 trade and compaction is a later problem.
 type dictionary struct {
 	values []string
+	// lower mirrors values, folded for case-insensitive comparison. Built
+	// as entries are added rather than on first use: it is a few hundred
+	// nanoseconds per distinct value during an insert, against a visible
+	// pause the first time anyone types in a search box.
+	lower []string
 	// index maps a hash of the value to the ids that hash there. A
 	// map[string]int32 would be the obvious thing, but looking one up from
 	// UTF-8 bytes means building a Go string first, and a 200k-row insert
@@ -80,6 +85,7 @@ func (d *dictionary) add(h uint64, s string) int32 {
 	}
 	id := int32(len(d.values))
 	d.values = append(d.values, s)
+	d.lower = append(d.lower, lowerASCII(s))
 	d.index[bucket(h)] = append(d.index[bucket(h)], id)
 	return id
 }

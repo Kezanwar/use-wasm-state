@@ -83,9 +83,8 @@ func (t *Table) ensureFilterMatches() {
 				}
 				continue
 			}
-			c.ensureLower()
 			for id := int32(0); id < n; id++ {
-				if containsASCII(c.lower[id], needle) {
+				if containsASCII(c.dict.lower[id], needle) {
 					set.bits.set(id)
 				}
 			}
@@ -169,9 +168,8 @@ func (t *Table) ensureSearchMatches() {
 		}
 		set.reset(n)
 
-		c.ensureLower()
 		for id := int32(0); id < n; id++ {
-			if containsASCII(c.lower[id], needle) {
+			if containsASCII(c.dict.lower[id], needle) {
 				set.bits.set(id)
 			}
 		}
@@ -197,21 +195,6 @@ func (t *Table) matchesSearch(id int32) bool {
 /* ------------------------------------------------------------------ */
 /* Case folding                                                        */
 /* ------------------------------------------------------------------ */
-
-// ensureLower caches every dictionary entry lowercased, so a search is a
-// substring test rather than a fold plus a substring test per row.
-//
-// New data rather than garbage: it is kept for the life of the column and
-// only ever appended to, exactly like the dictionary it mirrors.
-func (c *column) ensureLower() {
-	n := c.dict.len()
-	if int32(len(c.lower)) >= n {
-		return
-	}
-	for id := int32(len(c.lower)); id < n; id++ {
-		c.lower = append(c.lower, lowerASCII(c.dict.values[id]))
-	}
-}
 
 // lowerASCII folds A-Z only.
 //

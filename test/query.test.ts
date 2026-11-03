@@ -43,9 +43,9 @@ describe("sorting", () => {
     table.sortBy("id", "desc");
     expect(ids(table)).toEqual([4, 3, 2, 1, 0]);
 
-    // Byte order, so an uppercase letter sorts before a lowercase one.
+    // Case-insensitive, so "Shipped" sorts with the other s words.
     table.sortBy("status", "asc");
-    expect(ids(table)).toEqual([3, 1, 4, 0, 2]);
+    expect(ids(table)).toEqual([1, 4, 0, 2, 3]);
   });
 
   it("breaks ties by row id", async () => {
@@ -63,7 +63,7 @@ describe("sorting", () => {
         { column: "price", direction: "desc" },
       ],
     });
-    expect(ids(table)).toEqual([3, 4, 1, 0, 2]);
+    expect(ids(table)).toEqual([4, 1, 0, 2, 3]);
   });
 
   it("clears the sort when sortBy is given no direction", async () => {

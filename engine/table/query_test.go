@@ -42,9 +42,10 @@ func TestSortSingleColumn(t *testing.T) {
 		{"f64 descending", []SortKey{{Col: 1, Desc: true}}, []int32{4, 0, 2, 1, 3}},
 		{"i32 ascending", []SortKey{{Col: 0}}, []int32{0, 1, 2, 3, 4}},
 		{"i32 descending", []SortKey{{Col: 0, Desc: true}}, []int32{4, 3, 2, 1, 0}},
-		// Byte order, so uppercase sorts before lowercase.
-		{"string ascending", []SortKey{{Col: 2}}, []int32{3, 1, 4, 0, 2}},
-		{"string descending", []SortKey{{Col: 2, Desc: true}}, []int32{0, 2, 1, 4, 3}},
+		// Case-insensitive, so "Shipped" sorts with the other s words
+		// rather than above everything.
+		{"string ascending", []SortKey{{Col: 2}}, []int32{1, 4, 0, 2, 3}},
+		{"string descending", []SortKey{{Col: 2, Desc: true}}, []int32{3, 0, 2, 1, 4}},
 	}
 
 	for _, tc := range cases {
@@ -96,10 +97,10 @@ func TestSortDescendingKeepsTiesInRowIDOrder(t *testing.T) {
 
 func TestMultiColumnSort(t *testing.T) {
 	// status ascending, then price descending within each status.
-	//   "Shipped": 3
 	//   "new":     4 (40), 1 (10)
 	//   "paid":    0 (30), 2 (20)
-	want := []int32{3, 4, 1, 0, 2}
+	//   "Shipped": 3
+	want := []int32{4, 1, 0, 2, 3}
 
 	for _, mode := range []sortMode{sortRadix, sortCompare} {
 		tbl := queryTable(t)
@@ -583,18 +584,17 @@ func TestDictionaryGrowthInvalidatesTheRankCache(t *testing.T) {
 	if err := tbl.SetQuery(Query{Sort: []SortKey{{Col: 2}}}); err != nil {
 		t.Fatalf("SetQuery: %v", err)
 	}
-	// Shipped, new, new, paid, paid
-	if got := order(t, tbl); !equalI32(got, []int32{3, 1, 4, 0, 2}) {
+	// new, new, paid, paid, Shipped
+	if got := order(t, tbl); !equalI32(got, []int32{1, 4, 0, 2, 3}) {
 		t.Fatalf("order = %v", got)
 	}
 
-	// "AAA" is a new dictionary entry, and sorts before every existing
-	// one, so the ranks built a moment ago are stale. Byte order, so an
-	// uppercase letter beats a lowercase one.
+	// "AAA" is a new dictionary entry and sorts before every existing one,
+	// so the ranks built a moment ago are stale.
 	if err := tbl.SetString(0, 2, "AAA"); err != nil {
 		t.Fatalf("SetString: %v", err)
 	}
-	if got := order(t, tbl); !equalI32(got, []int32{0, 3, 1, 4, 2}) {
+	if got := order(t, tbl); !equalI32(got, []int32{0, 1, 4, 2, 3}) {
 		t.Fatalf("order = %v, want the new value first", got)
 	}
 }
@@ -696,5 +696,74 @@ func TestSortAllocatesNothingWhenRepeated(t *testing.T) {
 	allocs := testing.AllocsPerRun(50, func() { tbl.rebuildOrder() })
 	if allocs != 0 {
 		t.Fatalf("rebuildOrder allocated %v times per run, want 0", allocs)
+	}
+}
+
+func TestStringSortIgnoresCase(t *testing.T) {
+	tbl := newTestTable(t, Schema{{Name: "name", Type: String}})
+	if _, err := tbl.InsertColumns([]ColumnData{
+		{Strings: []string{"Zed", "alice", "Bob", "carol", "ALICE"}},
+	}); err != nil {
+		t.Fatalf("InsertColumns: %v", err)
+	}
+	if err := tbl.SetQuery(Query{Sort: []SortKey{{Col: 0}}}); err != nil {
+		t.Fatalf("SetQuery: %v", err)
+	}
+
+	// ALICE, alice, Bob, carol, Zed: folded order, with byte order
+	// settling the two spellings of the same name. Plain byte order would
+	// have put every capitalised name above every lowercase one.
+	dict, _ := tbl.DictSince(0, 0)
+	v := tbl.View(0, 5)
+	got := make([]string, 5)
+	for i, id := range v.Cols[0].I32 {
+		got[i] = dict[id]
+	}
+	if !equalStrings(got, []string{"ALICE", "alice", "Bob", "carol", "Zed"}) {
+		t.Fatalf("order = %v", got)
+	}
+}
+
+func TestStringSortBreaksCaseTiesByByteOrder(t *testing.T) {
+	tbl := newTestTable(t, Schema{{Name: "name", Type: String}})
+	if _, err := tbl.InsertColumns([]ColumnData{
+		{Strings: []string{"bob", "BOB", "Bob"}},
+	}); err != nil {
+		t.Fatalf("InsertColumns: %v", err)
+	}
+	if err := tbl.SetQuery(Query{Sort: []SortKey{{Col: 0}}}); err != nil {
+		t.Fatalf("SetQuery: %v", err)
+	}
+
+	// All three fold to "bob", so byte order settles it: uppercase first.
+	dict, _ := tbl.DictSince(0, 0)
+	v := tbl.View(0, 3)
+	got := make([]string, 3)
+	for i, id := range v.Cols[0].I32 {
+		got[i] = dict[id]
+	}
+	if !equalStrings(got, []string{"BOB", "Bob", "bob"}) {
+		t.Fatalf("order = %v, want BOB, Bob, bob", got)
+	}
+}
+
+func TestLowercaseMirrorGrowsWithTheDictionary(t *testing.T) {
+	tbl := newTestTable(t, Schema{{Name: "name", Type: String}})
+	if _, err := tbl.InsertColumns([]ColumnData{{Strings: []string{"Alpha", "BETA"}}}); err != nil {
+		t.Fatalf("InsertColumns: %v", err)
+	}
+
+	// Built as entries arrive, not on first use, so a search never pays
+	// for a column it has not searched before.
+	c := &tbl.cols[0]
+	if !equalStrings(c.dict.lower, []string{"alpha", "beta"}) {
+		t.Fatalf("lower = %v", c.dict.lower)
+	}
+
+	if err := tbl.SetString(0, 0, "Gamma"); err != nil {
+		t.Fatalf("SetString: %v", err)
+	}
+	if !equalStrings(c.dict.lower, []string{"alpha", "beta", "gamma"}) {
+		t.Fatalf("lower = %v after an edit", c.dict.lower)
 	}
 }

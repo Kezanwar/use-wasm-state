@@ -49,6 +49,11 @@ func i32Key(v int32) uint64 { return uint64(uint32(v) ^ 0x80000000) }
 // ensureRank gives every dictionary entry its position in the dictionary
 // sorted by value, so a string column sorts as integers like the others.
 //
+// Ordered case-insensitively, with byte order breaking ties, because a
+// column of names sorted by byte would put every capitalised entry above
+// every lowercase one and read as broken. The fold is free here: the
+// dictionary already keeps a lowercase mirror.
+//
 // Built once per column and rebuilt only when the dictionary has grown,
 // which is what makes sorting a 200k-row string column cost one pass over
 // the rows rather than 200k string comparisons.
@@ -65,13 +70,16 @@ func (c *column) ensureRank() {
 	c.rankOrder = c.rankOrder[:n]
 	c.rank = c.rank[:n]
 
-	values := c.dict.values
+	values, lower := c.dict.values, c.dict.lower
 	for i := int32(0); i < n; i++ {
 		c.rankOrder[i] = i
 	}
 	// A comparison sort, but over distinct values rather than rows: a
 	// status column is six entries against two hundred thousand.
 	slices.SortFunc(c.rankOrder, func(a, b int32) int {
+		if folded := compareStrings(lower[a], lower[b]); folded != 0 {
+			return folded
+		}
 		return compareStrings(values[a], values[b])
 	})
 	for position, id := range c.rankOrder {

@@ -9,13 +9,12 @@ type column struct {
 	f64  []float64 // F64 values
 	dict dictionary
 
-	// Caches derived from the dictionary, for sorting and searching. Both
-	// are rebuilt only when the dictionary has grown past the stamp, and
-	// both are kept for the life of the column rather than per query.
-	rank      []int32  // dictionary id -> position in value order
-	rankOrder []int32  // scratch for building rank
-	rankFor   int32    // dictionary length rank was built for
-	lower     []string // dictionary id -> value, lowercased
+	// The sort ranks, rebuilt only when the dictionary has grown past the
+	// stamp. The lowercase mirror lives on the dictionary itself, because
+	// it is appended with each entry rather than derived later.
+	rank      []int32 // dictionary id -> position in value order
+	rankOrder []int32 // scratch for building rank
+	rankFor   int32   // dictionary length rank was built for
 }
 
 // Table is a columnar store with stable row ids.
