@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Rebuilds the bundled engine from engine/ into src/wasm/engine.wasm, then
+ * Rebuilds the bundled engine from engine/ into src/datagrid/datagrid.wasm, then
  * audits it.
  *
  * Requires TinyGo: https://tinygo.org/getting-started/install/
@@ -37,7 +37,7 @@ import { fileURLToPath } from "node:url";
 import { exit } from "node:process";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-const out = resolve(root, "src/wasm/engine.wasm");
+const out = resolve(root, "src/datagrid/datagrid.wasm");
 
 function run(cmd, args, opts = {}) {
   const res = spawnSync(cmd, args, { stdio: "inherit", ...opts });
@@ -52,7 +52,7 @@ if (run("tinygo", ["version"], { stdio: "ignore" }) === null) {
 
 mkdirSync(dirname(out), { recursive: true });
 
-console.log("building src/wasm/engine.wasm");
+console.log("building src/datagrid/datagrid.wasm");
 const built = run(
   "tinygo",
   ["build", "-target=wasm-unknown", "-gc=precise", "-no-debug", "-o", out, "."],

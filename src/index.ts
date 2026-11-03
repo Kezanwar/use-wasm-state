@@ -1,43 +1,23 @@
 /**
- * Public surface of use-wasm-state.
+ * use-wasm-state: what every state pattern shares.
  *
- * Everything under src/engine and src/internal stays private: the wire
- * format, the allocator protocol and the module loader are contracts
- * between this package and its own engine, not API. The one exception is
- * WasmStateError, which a consumer has to be able to catch and name.
+ * The providers, the error type and the shapes common to all of them.
+ * Nothing here knows what any one pattern is: each lives in its own entry
+ * point and brings its own engine.
  */
 
-export { createEngine } from "./store/create-engine";
-export type { Engine, EngineOptions, Mode, StoreFor } from "./store/create-engine";
-
-export { defineSchema } from "./store/schema";
+export {
+  useWasmStateAsync,
+  useWasmStateSync,
+  WasmStateAsyncProvider,
+  WasmStateSyncProvider,
+} from "./core/providers";
 export type {
-  ColumnArray,
-  ColumnKind,
-  ColumnsInput,
-  Row,
-  SchemaSpec,
-  TableSchema,
-  ValueOf,
-} from "./store/schema";
+  WasmState,
+  WasmStateAsyncProviderProps,
+  WasmStateSyncProviderProps,
+} from "./core/providers";
+export type { WasmStateDef } from "./core/contract";
 
-export type { RowIds, TableReader, TableStore, TableView } from "./store/table-store";
-export type { AsyncTableStore } from "./store/async-table-store";
-
-export { WasmStateError } from "./engine/errors";
-export type { WasmStateErrorCode } from "./engine/errors";
-
-export { useWasmTable } from "./react/use-wasm-table";
-export type { UseWasmTableOptions, UseWasmTableResult } from "./react/use-wasm-table";
-
-export { useTableQuery, useTableStats, useTableView } from "./react/use-table-view";
-export type { TableStats } from "./react/use-table-view";
-
-export type {
-  FilterClause,
-  NumericOp,
-  SortDirection,
-  SortSpec,
-  StringOp,
-  TableQuery,
-} from "./store/query";
+export { WasmStateError } from "./core/errors";
+export type { WasmStateErrorCode } from "./core/errors";

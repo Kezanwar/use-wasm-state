@@ -7,7 +7,7 @@
     "wasm",
     "webassembly",
     "state",
-    "table",
+    "datagrid",
     "data-grid",
     "web-worker",
     "typescript",
@@ -28,14 +28,26 @@
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",
   "types": "./dist/index.d.ts",
+  "typesVersions": {
+    "*": {
+      "datagrid": [
+        "./dist/datagrid.d.ts"
+      ]
+    }
+  },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.cjs"
     },
-    "./engine.wasm": "./dist/engine.wasm",
-    "./worker.js": "./dist/worker.js",
+    "./datagrid": {
+      "types": "./dist/datagrid.d.ts",
+      "import": "./dist/datagrid.js",
+      "require": "./dist/datagrid.cjs"
+    },
+    "./datagrid.wasm": "./dist/datagrid.wasm",
+    "./datagrid.worker.js": "./dist/datagrid.worker.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -50,7 +62,7 @@
     "dev": "pnpm build && pnpm --filter use-wasm-state-demo dev",
     "build": "tsup",
     "build:wasm": "node scripts/build-wasm.mjs",
-    "inspect:wasm": "node scripts/inspect-wasm.mjs src/wasm/engine.wasm --expect-exports-from scripts/engine-exports.mjs",
+    "inspect:wasm": "node scripts/inspect-wasm.mjs src/datagrid/datagrid.wasm --expect-exports-from scripts/engine-exports.mjs",
     "typecheck": "tsc --noEmit && pnpm --filter use-wasm-state-demo exec tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

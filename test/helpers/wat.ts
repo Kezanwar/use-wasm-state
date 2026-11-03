@@ -29,7 +29,7 @@ export async function watToWasm(name: string): Promise<Uint8Array<ArrayBuffer>> 
 }
 
 /** The committed engine build. Present without TinyGo installed. */
-export const ENGINE_WASM_PATH = resolve(root, "src/wasm/engine.wasm");
+export const ENGINE_WASM_PATH = resolve(root, "src/datagrid/datagrid.wasm");
 
 export async function engineWasmBytes(): Promise<Uint8Array<ArrayBuffer>> {
   return Uint8Array.from(await readFile(ENGINE_WASM_PATH));

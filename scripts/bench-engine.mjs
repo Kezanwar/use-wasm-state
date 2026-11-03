@@ -7,18 +7,20 @@
  * it is the whole cost of a scroll step as React would pay it, not just the
  * wasm call.
  *
- * The store numbers at the end go through the public API, so they include
- * the dictionary mirror, the view cache and the row-object building a grid
- * actually pays for. Those are the ones to quote.
+ * The store numbers at the end go through the store's public API, so they
+ * include the dictionary mirror, the view cache and the row-object building
+ * a grid actually pays for. Those are the ones to quote.
  *
- *   node scripts/bench-engine.mjs [path/to/engine.wasm]
+ *   node scripts/bench-engine.mjs [path/to/datagrid.wasm]
  */
-import { existsSync, readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { mkdtempSync, readFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { argv } from "node:process";
+import { build } from "tsup";
 
-const file = resolve(argv[2] ?? "src/wasm/engine.wasm");
+const file = resolve(argv[2] ?? "src/datagrid/datagrid.wasm");
 const ROWS = 200_000;
 const LABELS = ["new", "paid", "picked", "shipped", "held", "cancelled"];
 
@@ -149,19 +151,26 @@ console.log(`  setCellF64              ${editUs.toFixed(2)}us`);
 /* Through the store                                                   */
 /* ------------------------------------------------------------------ */
 
-// The built package, so these numbers describe what a consumer installs.
-// Run `pnpm build` first.
-const distPath = resolve(import.meta.dirname, "../dist/index.js");
-if (!existsSync(distPath)) {
-  console.error("\nskipping the store benchmarks: dist/ is missing. Run `pnpm build` first.");
-  process.exit(0);
-}
-const { createEngine, defineSchema } = await import(pathToFileURL(distPath).href);
+// The shipped datagrid source, bundled the way the package bundles it, so
+// these numbers describe the code a consumer installs. The engine loader is
+// internal, which is why this builds its own entry rather than importing
+// the package.
+const outDir = mkdtempSync(join(tmpdir(), "use-wasm-state-bench-"));
+await build({
+  entry: { bench: resolve(import.meta.dirname, "bench-entry.ts") },
+  format: ["esm"],
+  outDir,
+  target: "es2022",
+  config: false,
+  silent: true,
+  dts: false,
+});
+const { loadSyncEngine, defineSchema } = await import(pathToFileURL(join(outDir, "bench.js")).href);
 
-// createEngine loads the module over fetch, which cannot read a local
-// path. Serve the file the same way the tests do, so the benchmark
-// measures the real load path rather than going around it.
-const WASM_URL = "https://engine.bench/engine.wasm";
+// The engine loads its module over fetch, which cannot read a local path.
+// Serve the file the same way the tests do, so the benchmark measures the
+// real load path rather than going around it.
+const WASM_URL = "https://engine.bench/datagrid.wasm";
 globalThis.fetch = async () =>
   new Response(readFileSync(file), { headers: { "content-type": "application/wasm" } });
 
@@ -176,8 +185,8 @@ for (let i = 0; i < ROWS; i++) {
 }
 
 async function freshTable() {
-  const engine = await createEngine({ wasmUrl: WASM_URL });
-  return { engine, table: engine.createTable(storeSchema) };
+  const engine = await loadSyncEngine({ wasmUrl: WASM_URL });
+  return { engine, table: engine.createGrid(storeSchema) };
 }
 
 async function timeStore() {

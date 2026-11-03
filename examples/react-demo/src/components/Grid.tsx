@@ -2,23 +2,16 @@ import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { ArrowDown, ArrowUp } from "lucide-react";
 import { cn } from "cn";
 import {
-  useTableQuery,
-  useTableView,
-  type AsyncTableStore,
+  useDataGridQuery,
+  useDataGridView,
+  type AnyDataGridStore,
   type SortDirection,
-  type TableStore,
-} from "use-wasm-state";
+} from "use-wasm-state/datagrid";
 import { useVirtualWindow } from "@/hooks/useVirtualWindow";
 import { formatDate, formatPrice } from "@/lib/format";
-import type { Order, schema } from "@/lib/orders";
+import type { Order, orders } from "@/lib/orders";
 
-type Schema = typeof schema.spec;
-
-/**
- * Either store. They differ only in whether a mutation returns a Promise,
- * and the grid never looks at the return, so one component drives both.
- */
-export type AnyTable = TableStore<Schema> | AsyncTableStore<Schema>;
+type Schema = typeof orders.spec;
 
 const ROW_HEIGHT = 32;
 
@@ -59,21 +52,22 @@ export const selectionRange = (s: Selection) => ({
 });
 
 export interface GridProps {
-  table: AnyTable;
+  grid: AnyDataGridStore<Schema>;
   /** Worker mode fetches a window a round trip later, so it reads ahead. */
   overscan?: number;
   rowCount: number;
   selection: Selection | null;
   onSelectionChange: (selection: Selection | null) => void;
-  onEdit: (run: () => void) => void;
+  /** Runs an edit, so the caller can time it. */
+  onEdit: (run: () => unknown) => void;
   /** Sorting changes the query, which the caller treats differently. */
-  onSort: (run: () => void) => void;
+  onSort: (run: () => unknown) => void;
 }
 
-export function Grid({ table, rowCount, selection, onSelectionChange, onEdit, onSort }: GridProps) {
+export function Grid({ grid, rowCount, selection, onSelectionChange, onEdit, onSort }: GridProps) {
   const window = useVirtualWindow(rowCount, ROW_HEIGHT);
-  const view = useTableView(table, window.start, window.count);
-  const query = useTableQuery(table);
+  const view = useDataGridView(grid, window.start, window.count);
+  const query = useDataGridQuery(grid);
 
   const [cursor, setCursor] = useState<Cursor>({ row: 0, col: 0 });
   const [editing, setEditing] = useState(false);
@@ -132,8 +126,8 @@ export function Grid({ table, rowCount, selection, onSelectionChange, onEdit, on
    * row per render would make every row's props new every time, and the
    * memoisation above would buy nothing.
    */
-  const latest = useRef({ table, selection, onEdit, onSelectionChange });
-  latest.current = { table, selection, onEdit, onSelectionChange };
+  const latest = useRef({ grid, selection, onEdit, onSelectionChange });
+  latest.current = { grid, selection, onEdit, onSelectionChange };
 
   const select = useCallback((offset: number, extend: boolean) => {
     const { selection: current, onSelectionChange: change } = latest.current;
@@ -152,7 +146,7 @@ export function Grid({ table, rowCount, selection, onSelectionChange, onEdit, on
 
   const commit = useCallback((rowId: number, col: number, value: string | number) => {
     setEditing(false);
-    const { table: store, onEdit: measure } = latest.current;
+    const { grid: store, onEdit: measure } = latest.current;
     // Measured by the caller, so the status bar shows what the engine
     // cost rather than what React did afterwards.
     measure(() => store.setCell(rowId, COLUMNS[col]!.key, value as never));
@@ -185,7 +179,7 @@ export function Grid({ table, rowCount, selection, onSelectionChange, onEdit, on
               type="button"
               data-testid={`sort-${column.key}`}
               aria-sort={sort ? (sort.direction === "desc" ? "descending" : "ascending") : "none"}
-              onClick={(event) => onSort(() => cycleSort(table, column.key, event.shiftKey))}
+              onClick={(event) => onSort(() => cycleSort(grid, column.key, event.shiftKey))}
               className={cn(
                 "hover:text-foreground flex items-center gap-1 truncate px-3 leading-8 transition-colors",
                 column.align === "right" && "justify-end",
@@ -208,7 +202,7 @@ export function Grid({ table, rowCount, selection, onSelectionChange, onEdit, on
         })}
       </div>
 
-      {/* Sized to the whole table so the scrollbar tells the truth, while
+      {/* Sized to the whole grid so the scrollbar tells the truth, while
           only the visible rows exist in the DOM. */}
       <div style={{ height: window.totalHeight }} className="relative">
         {/* Positioned from the view's own start, not the window we asked
@@ -404,21 +398,18 @@ const Cell = memo(function Cell({
  * Three states on one control, and the arrow says which one you are in, so
  * there is nothing to explain.
  */
-function cycleSort(table: AnyTable, column: keyof Order, shift: boolean) {
-  const sort = table.query.sort;
+function cycleSort(grid: AnyDataGridStore<Schema>, column: keyof Order, shift: boolean) {
+  const sort = grid.query.sort;
   const at = sort.findIndex((key) => key.column === column);
   const current: SortDirection | undefined = at === -1 ? undefined : sort[at]!.direction;
   const next: SortDirection | undefined =
     current === undefined ? "asc" : current === "asc" ? "desc" : undefined;
 
-  if (!shift) {
-    table.sortBy(column, next);
-    return;
-  }
+  if (!shift) return grid.sortBy(column, next);
 
   const rest = sort.filter((key) => key.column !== column);
-  table.setQuery({
-    ...table.query,
+  return grid.setQuery({
+    ...grid.query,
     sort: next ? [...rest, { column, direction: next }] : rest,
   });
 }

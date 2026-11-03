@@ -2,16 +2,21 @@ import { copyFileSync, mkdirSync } from "node:fs";
 import { defineConfig } from "tsup";
 
 export default defineConfig({
-  // Two bundles: the package, and the worker. The worker is its own entry
-  // because the main one imports React, which a worker has no business
-  // loading. Consumers never import it; createEngine resolves it with
-  // new URL("./worker.js", import.meta.url).
-  entry: ["src/index.ts", "src/worker.ts"],
-  // Each entry self-contained. Splitting would have worker.js import a
-  // shared chunk, and a bundler copying worker.js as an asset URL copies
-  // only that one file: the worker then 404s on its own chunk, in the
-  // production build only. The engine is duplicated instead, which is a
-  // few kB against a mode that does not work.
+  // The root, every pattern, and each pattern's worker. A worker is its own
+  // entry because the main ones import React, which a worker has no
+  // business loading. Consumers never import it; the datagrid resolves it
+  // with new URL("./datagrid.worker.js", import.meta.url).
+  entry: {
+    index: "src/index.ts",
+    datagrid: "src/datagrid/index.ts",
+    "datagrid.worker": "src/datagrid/worker.ts",
+  },
+  // Each entry self-contained. Splitting would have them import a shared
+  // chunk, and a bundler copying datagrid.worker.js as an asset URL copies
+  // only that one file: the worker then 404s on its chunk, in the
+  // production build only. Shared code is duplicated instead; the two
+  // things that must stay single across copies, the provider contexts and
+  // WasmStateError, are keyed on global symbols. See src/core/context.ts.
   splitting: false,
   format: ["esm", "cjs"],
   dts: true,
@@ -23,11 +28,11 @@ export default defineConfig({
   // bundlers tree-shake it fine without this.
   treeshake: false,
   target: "es2022",
-  // createEngine resolves the default engine.wasm with
-  // new URL("./engine.wasm", import.meta.url). CJS has no import.meta, so
+  // The datagrid resolves its engine with
+  // new URL("./datagrid.wasm", import.meta.url). CJS has no import.meta, so
   // tsup rewrites it to a __dirname-based equivalent. Without this the CJS
   // bundle throws on load in Node. test/dist-output.test.ts asserts no
-  // bare import.meta survives into dist/index.cjs.
+  // bare import.meta survives into any .cjs.
   shims: true,
   // react stays external; it is a peer dependency, never bundled.
   external: ["react"],
@@ -36,10 +41,11 @@ export default defineConfig({
   banner: { js: '"use client";' },
   outExtension: ({ format }) => ({ js: format === "esm" ? ".js" : ".cjs" }),
   // The engine is committed, not generated at publish time, so it just gets
-  // copied. Consumers resolve it with new URL("./engine.wasm", import.meta.url),
-  // which needs the file to sit next to index.js.
+  // copied. The datagrid resolves it with
+  // new URL("./datagrid.wasm", import.meta.url), which needs the file to
+  // sit next to datagrid.js.
   onSuccess: async () => {
     mkdirSync("dist", { recursive: true });
-    copyFileSync("src/wasm/engine.wasm", "dist/engine.wasm");
+    copyFileSync("src/datagrid/datagrid.wasm", "dist/datagrid.wasm");
   },
 });

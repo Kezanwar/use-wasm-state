@@ -1,5 +1,5 @@
 /**
- * The exact shape src/wasm/engine.wasm is expected to have.
+ * The exact shape src/datagrid/datagrid.wasm is expected to have.
  *
  * One source of truth for the audit: scripts/inspect-wasm.mjs reads it, and
  * src/engine/abi.ts declares the same ABI names in ENGINE_EXPORTS. An export

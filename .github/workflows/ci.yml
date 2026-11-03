@@ -41,7 +41,7 @@ jobs:
       # committed.
       - run: pnpm test:go
 
-      - name: Check the committed engine.wasm still imports nothing
+      - name: Check the committed datagrid.wasm still imports nothing
         run: pnpm inspect:wasm
 
   e2e:

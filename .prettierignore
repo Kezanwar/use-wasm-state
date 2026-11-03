@@ -1,7 +1,7 @@
 dist/
 coverage/
 examples/react-demo/dist/
-src/wasm/*.wasm
+src/**/*.wasm
 playwright-report/
 test-results/
 pnpm-lock.yaml

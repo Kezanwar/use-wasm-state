@@ -123,14 +123,6 @@ test("typing in the search box drops no frames", async ({ page }) => {
   const { cold, longest, longestFrame, frames } = await page.evaluate(async () => {
     const tasks: number[] = [];
     let observer: PerformanceObserver | null = null;
-    try {
-      observer = new PerformanceObserver((list) => {
-        for (const entry of list.getEntries()) tasks.push(entry.duration);
-      });
-      observer.observe({ entryTypes: ["longtask"] });
-    } catch {
-      // Not every engine ships longtask.
-    }
 
     const input = document.querySelector('[data-testid="search"]') as HTMLInputElement;
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")!.set!;
@@ -150,6 +142,17 @@ test("typing in the search box drops no frames", async ({ page }) => {
     setValue.call(input, "");
     input.dispatchEvent(new Event("input", { bubbles: true }));
     await new Promise((resolve) => requestAnimationFrame(resolve));
+
+    // Watched from here, so the one-off build above is held to its own
+    // budget below and not counted as a dropped frame while typing.
+    try {
+      observer = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) tasks.push(entry.duration);
+      });
+      observer.observe({ entryTypes: ["longtask"] });
+    } catch {
+      // Not every engine ships longtask.
+    }
 
     const intervals: number[] = [];
     for (const text of ["s", "sh", "shi", "ship", "shipp", "shippe", "shipped"]) {

@@ -12,96 +12,159 @@ import { describe, expect, it } from "vitest";
 
 const root = process.cwd();
 const dist = (f: string) => resolve(root, "dist", f);
-const built = existsSync(dist("index.js"));
+const read = (f: string) => readFileSync(dist(f), "utf8");
+const built = existsSync(dist("index.js")) && existsSync(dist("datagrid.js"));
+
+/** The two entries a consumer imports, in both module formats. */
+const ENTRIES = ["index", "datagrid"] as const;
+const BUNDLES = ENTRIES.flatMap((name) => [`${name}.js`, `${name}.cjs`]);
+
+const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
 
 describe.skipIf(!built)("dist", () => {
-  it('starts both bundles with "use client"', () => {
+  it('starts every entry with "use client"', () => {
     // Next.js App Router only treats a module as client code if the
     // directive is the very first statement. tsup's treeshake pass silently
     // strips it, which is why treeshake is off in tsup.config.ts.
-    for (const file of ["index.js", "index.cjs"]) {
-      const first = readFileSync(dist(file), "utf8").split("\n")[0]!.trim();
-      expect(first, file).toBe('"use client";');
+    for (const file of BUNDLES) {
+      expect(read(file).split("\n")[0]!.trim(), file).toBe('"use client";');
     }
   });
 
-  it("ships type declarations for both module formats", () => {
-    expect(existsSync(dist("index.d.ts"))).toBe(true);
-    expect(existsSync(dist("index.d.cts"))).toBe(true);
+  it("ships type declarations for every entry in both module formats", () => {
+    for (const name of ENTRIES) {
+      expect(existsSync(dist(`${name}.d.ts`)), name).toBe(true);
+      expect(existsSync(dist(`${name}.d.cts`)), name).toBe(true);
+    }
   });
 
-  it("ships the worker as its own bundle, without React", () => {
-    // The worker carries the engine and nothing else: the main entry
-    // imports React, which a worker has no business loading.
-    expect(existsSync(dist("worker.js"))).toBe(true);
-    const worker = readFileSync(dist("worker.js"), "utf8");
+  it("keeps every entry self-contained", () => {
+    // A bundler copying a worker as an asset URL copies that one file, and
+    // one that imported a shared chunk would 404 on it, in the production
+    // build and nowhere else. The main entries are held to the same rule:
+    // no relative imports at all, so each stands on its own.
+    for (const file of [...BUNDLES, "datagrid.worker.js"]) {
+      const code = read(file);
+      expect(code, file).not.toMatch(/from\s*["']\.\.?\//);
+      expect(code, file).not.toMatch(/import\s*\(\s*["']\.\.?\//);
+      expect(code, file).not.toMatch(/require\(\s*["']\.\.?\//);
+    }
+  });
+
+  it("ships the datagrid's worker as its own bundle, without React", () => {
+    // The worker carries the engine and nothing else: the main entries
+    // import React, which a worker has no business loading.
+    const worker = read("datagrid.worker.js");
     expect(worker).not.toMatch(/from ["']react["']/);
     expect(worker).not.toMatch(/require\(["']react["']\)/);
   });
 
-  it("keeps the worker self-contained", () => {
-    // A bundler copying worker.js as an asset URL copies that one file.
-    // If it imported a shared chunk, the worker would 404 on it in the
-    // production build and nowhere else, which is how this was found.
-    const worker = readFileSync(dist("worker.js"), "utf8");
-    expect(worker).not.toMatch(/from\s*["']\.\/chunk-/);
-    expect(worker).not.toMatch(/import\s*\(\s*["']\.\//);
-  });
+  it("resolves the datagrid's engine and worker from beside its own entry", () => {
+    // new URL("./x", import.meta.url) needs the file next to datagrid.js,
+    // not in a sub-directory, and the same name the exports map gives it.
+    const entry = read("datagrid.js");
+    expect(entry).toContain('new URL("./datagrid.wasm", import.meta.url)');
+    expect(entry).toContain('new URL("./datagrid.worker.js", import.meta.url)');
 
-  it("ships the engine next to the bundles", () => {
-    // Consumers resolve it with new URL("./engine.wasm", import.meta.url),
-    // so it has to sit beside index.js, not in a sub-directory.
-    expect(existsSync(dist("engine.wasm"))).toBe(true);
-    expect(readFileSync(dist("engine.wasm"))).toEqual(
-      readFileSync(resolve(root, "src/wasm/engine.wasm"))
+    expect(readFileSync(dist("datagrid.wasm"))).toEqual(
+      readFileSync(resolve(root, "src/datagrid/datagrid.wasm"))
     );
+    expect(existsSync(dist("datagrid.worker.js"))).toBe(true);
+    expect(pkg.exports["./datagrid.wasm"]).toBe("./dist/datagrid.wasm");
+    expect(pkg.exports["./datagrid.worker.js"]).toBe("./dist/datagrid.worker.js");
   });
 
-  it("declares every public export in the types", () => {
-    const types = readFileSync(dist("index.d.ts"), "utf8");
-    for (const name of [
-      "createEngine",
-      "defineSchema",
-      "useWasmTable",
-      "useTableView",
-      "WasmStateError",
-      "TableStore",
-      "TableView",
-      "Row",
-      "RowIds",
-    ]) {
-      expect(types, name).toContain(name);
+  it("maps both entries, for both resolvers", () => {
+    for (const [path, name] of [
+      [".", "index"],
+      ["./datagrid", "datagrid"],
+    ] as const) {
+      expect(pkg.exports[path], path).toEqual({
+        types: `./dist/${name}.d.ts`,
+        import: `./dist/${name}.js`,
+        require: `./dist/${name}.cjs`,
+      });
+    }
+    // moduleResolution "node" ignores exports; this is how it finds the
+    // subpath's types.
+    expect(pkg.typesVersions["*"].datagrid).toEqual(["./dist/datagrid.d.ts"]);
+  });
+
+  it("declares each entry's public exports in its types", () => {
+    const expected = {
+      index: [
+        "WasmStateSyncProvider",
+        "WasmStateAsyncProvider",
+        "useWasmStateSync",
+        "useWasmStateAsync",
+        "WasmStateError",
+        "WasmStateErrorCode",
+        "WasmStateDef",
+      ],
+      datagrid: [
+        "useWasmDataGridSync",
+        "useWasmDataGridAsync",
+        "useDataGridView",
+        "useDataGridStats",
+        "useDataGridQuery",
+        "defineDataGrid",
+        "defineSchema",
+        "DataGridStore",
+        "AsyncDataGridStore",
+        "AnyDataGridStore",
+        "DataGridView",
+        "DataGridDef",
+      ],
+    };
+    for (const name of ENTRIES) {
+      const types = read(`${name}.d.ts`);
+      for (const symbol of expected[name]) expect(types, `${name}: ${symbol}`).toContain(symbol);
     }
   });
 
-  it("leaves no bare import.meta in the CJS bundle", () => {
-    // createEngine resolves its default engine.wasm with
-    // new URL("./engine.wasm", import.meta.url). CJS has no import.meta,
-    // so tsup's `shims` rewrites it; without that the bundle throws on
-    // require() before a consumer can even pass wasmUrl instead.
-    const cjs = readFileSync(dist("index.cjs"), "utf8");
-    expect(cjs).not.toMatch(/\bimport\s*\.\s*meta\b/);
+  it("keeps the internals out of the public types", () => {
+    // Loading a module, the provider registry and the definition contract
+    // are this package's own plumbing. Exporting them would turn
+    // implementation detail into API every later version has to keep.
+    const internal = {
+      index: ["createRegistry", "useSharedState", "StateDef", "Pattern", "loadModule"],
+      datagrid: ["loadSyncEngine", "WorkerClient", "withInput", "unpack", "createGridHost"],
+    };
+    for (const name of ENTRIES) {
+      // Declarations only: module headers ride along as comments, and they
+      // are allowed to name the code they describe.
+      const types = read(`${name}.d.ts`).replace(/\/\*[\s\S]*?\*\//g, "");
+      for (const symbol of internal[name]) {
+        expect(types, `${name}: ${symbol}`).not.toMatch(new RegExp(`\\b${symbol}\\b`));
+      }
+    }
   });
 
-  it("keeps the internal helpers out of the public types", () => {
-    // Loading a module and packing a pointer are this engine's own
-    // plumbing. Exporting them would turn an implementation detail into
-    // API that every later version has to keep working.
-    const types = readFileSync(dist("index.d.ts"), "utf8");
-    for (const name of ["unpack", "loadModule", "createHost", "withInput"]) {
-      expect(types, name).not.toContain(name);
+  it("knows nothing about the datagrid in the root", () => {
+    const code = read("index.js") + read("index.d.ts");
+    expect(code).not.toMatch(/datagrid|DataGrid|insertColumns/);
+  });
+
+  it("leaves no bare import.meta in any CJS bundle", () => {
+    // The datagrid resolves its engine and worker with
+    // new URL("./x", import.meta.url). CJS has no import.meta, so tsup's
+    // `shims` rewrites it; without that the bundle throws on require()
+    // before a consumer can even pass wasmUrl instead.
+    for (const name of ENTRIES) {
+      expect(read(`${name}.cjs`), name).not.toMatch(/\bimport\s*\.\s*meta\b/);
     }
   });
 
   it("has no runtime dependencies", () => {
-    const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
     expect(pkg.dependencies).toBeUndefined();
     expect(pkg.peerDependencies).toEqual({ react: ">=18" });
     expect(pkg.sideEffects).toBe(false);
   });
 
   it("keeps react external", () => {
-    expect(readFileSync(dist("index.js"), "utf8")).toMatch(/from ["']react["']/);
-    expect(readFileSync(dist("index.cjs"), "utf8")).toMatch(/require\(["']react["']\)/);
+    for (const name of ENTRIES) {
+      expect(read(`${name}.js`), name).toMatch(/from ["']react["']/);
+      expect(read(`${name}.cjs`), name).toMatch(/require\(["']react["']\)/);
+    }
   });
 });

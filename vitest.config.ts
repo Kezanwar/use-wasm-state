@@ -3,10 +3,18 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   resolve: {
-    alias: {
-      // The demo imports the package by name. Point it at source for tests.
-      "use-wasm-state": fileURLToPath(new URL("./src/index.ts", import.meta.url)),
-    },
+    // The demo imports the package by name. Point both entries at source.
+    // Exact matches, so the root alias does not swallow the subpath.
+    alias: [
+      {
+        find: /^use-wasm-state$/,
+        replacement: fileURLToPath(new URL("./src/index.ts", import.meta.url)),
+      },
+      {
+        find: /^use-wasm-state\/datagrid$/,
+        replacement: fileURLToPath(new URL("./src/datagrid/index.ts", import.meta.url)),
+      },
+    ],
   },
   test: {
     // Default to node. DOM tests opt in with `// @vitest-environment jsdom`.

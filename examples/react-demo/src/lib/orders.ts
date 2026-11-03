@@ -1,4 +1,4 @@
-import { defineSchema } from "use-wasm-state";
+import { defineSchema } from "use-wasm-state/datagrid";
 
 /**
  * The dataset, generated the same way on every load.
@@ -9,7 +9,7 @@ import { defineSchema } from "use-wasm-state";
  * browser tests all see identical data.
  */
 
-export const schema = defineSchema({
+export const orders = defineSchema({
   id: "i32",
   customer: "string",
   status: "string",

@@ -5,8 +5,6 @@ import { formatCount } from "@/lib/format";
 import { STATUSES } from "@/lib/orders";
 
 export interface ToolbarProps {
-  mode: "sync" | "worker";
-  onMode: (mode: "sync" | "worker") => void;
   selectedCount: number;
   search: string;
   statuses: readonly string[];
@@ -18,14 +16,12 @@ export interface ToolbarProps {
 }
 
 /**
- * Everything that shapes the table, in one row.
+ * Everything that shapes the grid, in one row.
  *
  * The status chips are the filter: a chip is on or off, and what is on is
  * what you see. Nothing needs a label to say so.
  */
 export function Toolbar({
-  mode,
-  onMode,
   selectedCount,
   search,
   statuses,
@@ -73,27 +69,6 @@ export function Toolbar({
       </div>
 
       <div className="ml-auto flex items-center gap-2">
-        {/* Two words, and the one that is on is the one that is running. */}
-        <div className="flex items-center rounded-md border p-0.5" role="group" aria-label="Mode">
-          {(["sync", "worker"] as const).map((value) => (
-            <button
-              key={value}
-              type="button"
-              aria-pressed={mode === value}
-              data-testid={`mode-${value}`}
-              onClick={() => onMode(value)}
-              className={cn(
-                "rounded px-2 py-0.5 text-xs transition-colors",
-                mode === value
-                  ? "bg-primary text-primary-foreground"
-                  : "text-muted-foreground hover:text-foreground"
-              )}
-            >
-              {value === "sync" ? "Main thread" : "Worker"}
-            </button>
-          ))}
-        </div>
-
         {selectedCount > 0 && (
           <Button variant="ghost" size="sm" onClick={onDelete} data-testid="delete">
             <Trash2 />

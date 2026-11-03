@@ -5,21 +5,21 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 const INSTALL = `npm install use-wasm-state`;
 
-const QUICK = `import { defineSchema, useWasmTable, useTableView } from "use-wasm-state";
+const QUICK = `import { defineSchema, useDataGridView, useWasmDataGridSync } from "use-wasm-state/datagrid";
 
 const schema = defineSchema({ item: "string", qty: "i32", price: "f64" });
 
 export function Basket() {
-  const { status, table } = useWasmTable(schema, {
+  const { status, grid } = useWasmDataGridSync(schema, {
     initialRows: [{ item: "Keyboard", qty: 2, price: 89 }],
   });
-  const view = useTableView(table, 0, 50);
+  const view = useDataGridView(grid, 0, 50);
 
   if (status !== "ready") return null;
 
   return (
     <>
-      <button onClick={() => table.insertRows([{ item: "Cable", qty: 8, price: 4.25 }])}>
+      <button onClick={() => grid.insertRows([{ item: "Cable", qty: 8, price: 4.25 }])}>
         Add
       </button>
       <ul>
@@ -34,26 +34,55 @@ export function Basket() {
 }`;
 
 const VIEWPORT = `// 200,000 rows live in Go. Fifty cross to JS.
-const view = useTableView(table, Math.floor(scrollTop / 32), 50);
+const view = useDataGridView(grid, Math.floor(scrollTop / 32), 50);
 
 // An edit is one call and one revision bump.
-table.setCell(rowId, "price", 12.5);`;
+grid.setCell(rowId, "price", 12.5);`;
+
+const WORKER = `const { status, grid } = useWasmDataGridAsync(schema);
+
+// Reads are the same, and still synchronous.
+const view = useDataGridView(grid, start, 50);
+
+// Mutations cross a thread, so they return Promises.
+await grid.setCell(rowId, "price", 12.5);
+await grid.sortBy("price", "desc");`;
+
+const PORTABLE = `// Awaits every mutation, so either store will do.
+function Reprice({ grid }: { grid: AnyDataGridStore<typeof schema.spec> }) {
+  return <button onClick={async () => await grid.setCell(0, "price", 9.99)}>Reprice</button>;
+}`;
+
+const SHARING = `import { WasmStateSyncProvider } from "use-wasm-state";
+import { defineDataGrid, useDataGridStats, useWasmDataGridSync } from "use-wasm-state/datagrid";
+
+// Once, at module scope. Nothing loads until a component uses it.
+export const Orders = defineDataGrid("orders", schema, { initialRows });
+
+export function App() {
+  return (
+    <WasmStateSyncProvider>
+      <OrderCount />
+      <OrderList />
+    </WasmStateSyncProvider>
+  );
+}
+
+function OrderCount() {
+  // The same grid in every component that names it.
+  const { grid } = useWasmDataGridSync(Orders);
+  return <p>{useDataGridStats(grid)?.rowCount}</p>;
+}`;
 
 const SERVING = `// Default: resolved next to the bundle, streaming compile kept.
-useWasmTable(schema);
+useWasmDataGridSync(schema);
 
 // Override for a CDN, a strict CSP, or a bundler that
 // cannot resolve the asset.
-useWasmTable(schema, { wasmUrl: "https://cdn.example.com/engine.wasm" });`;
+useWasmDataGridSync(schema, { wasmUrl: "https://cdn.example.com/datagrid.wasm" });
 
-const WORKER = `const { status, table } = useWasmTable(schema, { mode: "worker" });
-
-// Reads are the same, and still synchronous.
-const view = useTableView(table, start, 50);
-
-// Mutations cross a thread, so they return Promises.
-await table.setCell(rowId, "price", 12.5);
-await table.sortBy("price", "desc");`;
+// A provider takes the same, per pattern.
+<WasmStateAsyncProvider urls={{ datagrid: { wasmUrl, workerUrl } }}>`;
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
@@ -73,7 +102,7 @@ export function GettingStartedPage() {
         <CodeBlock code={INSTALL} label="bash" language="bash" />
       </Section>
 
-      <Section title="A table in twenty lines">
+      <Section title="A grid in twenty lines">
         <CodeBlock code={QUICK} label="tsx" />
       </Section>
 
@@ -82,39 +111,59 @@ export function GettingStartedPage() {
           Storing arbitrary <Js /> values in <Wasm>wasm</Wasm> means serialising on every read,
           which is slower than <code>useState</code>. It only pays off when the operations on the
           state run in <Wasm>wasm</Wasm> too. So <Go /> owns the rows, the string dictionaries and
-          the row order; React owns the scroll position and the selection. A counter on the table
+          the row order; React owns the scroll position and the selection. A counter on the grid
           bumps on every mutation, <code>useSyncExternalStore</code> watches that counter, and each
           component reads back only the rows it is showing.
         </p>
         <CodeBlock code={VIEWPORT} label="tsx" />
       </Section>
 
-      <Section title="Sync mode">
+      <Section title="On the main thread">
         <p className="text-muted-foreground text-sm">
-          The engine runs on the main thread, so a viewport is read during render and a mutation is
-          visible on the next line. Nothing is a Promise and there is no transport to go wrong,
-          which is why it is the default.
+          <code>useWasmDataGridSync</code> runs the engine on the main thread, so a viewport is read
+          during render and a mutation is visible on the next line. Nothing is a Promise and there
+          is no transport to go wrong.
         </p>
       </Section>
 
-      <Section title="Worker mode">
+      <Section title="In a worker">
         <p className="text-muted-foreground text-sm">
-          The engine moves off the main thread. Reads stay synchronous, because the worker sends
-          rows for every window on screen with each reply, so one round trip covers a whole user
-          action. Mutations return Promises, because they really do cross a thread. The option types
-          the result, and both stores satisfy <code>TableReader</code>, so a component that only
-          reads does not care which it was handed.
+          <code>useWasmDataGridAsync</code> moves the engine off the main thread. Reads stay
+          synchronous, because the worker sends rows for every window on screen with each reply, so
+          one round trip covers a whole user action. Mutations return Promises, because they really
+          do cross a thread.
         </p>
         <CodeBlock code={WORKER} label="tsx" />
+        <p className="text-muted-foreground text-sm">
+          The two stores differ only in what a mutation returns, and both satisfy{" "}
+          <code>DataGridReader</code>, which is what the read hooks take. A component that awaits
+          every mutation it makes can take <code>AnyDataGridStore</code> and run under either mode
+          unchanged; on a sync store the <code>await</code> costs a microtask and nothing else. The
+          200,000-row example is written that way.
+        </p>
+        <CodeBlock code={PORTABLE} label="tsx" />
       </Section>
 
-      <Section title="Serving engine.wasm">
+      <Section title="Sharing a grid">
         <p className="text-muted-foreground text-sm">
-          The engine is a 55 kB module that imports nothing. It is resolved with{" "}
-          <code>new URL("./engine.wasm", import.meta.url)</code>, which <Name>Vite</Name> and{" "}
+          Define a grid once and name it wherever it is needed. The schema travels with the key, so
+          two components cannot disagree about its shape. The provider creates the grid the first
+          time a component asks, hands every component the same one, and keeps it until the provider
+          unmounts, so the rows survive every component that showed them going away.{" "}
+          <code>useWasmStateSync().drop(Orders)</code> throws it away; the next use starts again
+          from <code>initialRows</code>. In a worker it is the same code with{" "}
+          <code>WasmStateAsyncProvider</code> and <code>useWasmDataGridAsync</code>.
+        </p>
+        <CodeBlock code={SHARING} label="tsx" />
+      </Section>
+
+      <Section title="Serving the engine">
+        <p className="text-muted-foreground text-sm">
+          The datagrid's engine is <code>datagrid.wasm</code>, a 55 kB module that imports nothing,
+          and its worker is <code>datagrid.worker.js</code>. Both are resolved with{" "}
+          <code>new URL("./…", import.meta.url)</code>, which <Name>Vite</Name> and{" "}
           <Name>webpack 5</Name> both understand. The <Name>CJS</Name> build ships a shim for{" "}
-          <code>import.meta.url</code>; if a bundler still cannot resolve the asset, pass{" "}
-          <code>wasmUrl</code>.
+          <code>import.meta.url</code>; if a bundler still cannot resolve the assets, pass the URLs.
         </p>
         <CodeBlock code={SERVING} label="tsx" />
       </Section>

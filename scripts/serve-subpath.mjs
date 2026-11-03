@@ -3,7 +3,7 @@
  * Serves the built demo from a sub-directory, the way GitHub Pages does.
  *
  * Pages publishes at /<repo>/, not /, so any absolute asset path such as
- * "/engine.wasm" resolves to the domain root and 404s. That breaks only in
+ * "/datagrid.wasm" resolves to the domain root and 404s. That breaks only in
  * production, which is the worst place to find out, so the browser suite
  * exercises it against this server.
  *

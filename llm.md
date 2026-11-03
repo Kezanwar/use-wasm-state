@@ -1,25 +1,32 @@
 # use-wasm-state
 
 React state that lives in a WebAssembly engine written in Go (TinyGo). Not
-generic state: it ships a prebuilt engine and exposes data structures whose
-operations run in wasm. First structure: a table.
+generic state: each kind of state ships its own prebuilt engine and runs its
+operations in wasm. First kind: a datagrid.
 
-Status: pre-release. Sync and worker modes both work. Shared tables are not
-implemented and report a recognisable error.
+Status: pre-release.
+
+## Two entry points
+
+- `use-wasm-state`: what every kind of state shares. The two providers,
+  `WasmStateError`, and the shared types. Knows nothing about grids.
+- `use-wasm-state/datagrid`: the grid, its hooks, its engine
+  (`datagrid.wasm`) and its worker (`datagrid.worker.js`).
 
 ## The model
 
 - **Go owns the data.** Rows, the string dictionaries, and the row order.
 - **React owns the UI.** Scroll position, selection, edit buffers.
-- **A revision drives reactivity.** Every mutation bumps a `uint32` on the
-  table. `useSyncExternalStore` subscribes to that number and nothing else.
-- **Only the viewport crosses.** A 200k-row table answers a scroll by
-  copying out the fifty rows on screen.
+- **A revision drives reactivity.** Every mutation bumps a counter on the
+  grid. `useSyncExternalStore` subscribes to that number and nothing else.
+- **Only the viewport crosses.** A 200k-row grid answers a scroll by copying
+  out the fifty rows on screen.
 - **Row ids are permanent.** They are positions in the column slices. A
-  delete writes a tombstone; surviving ids never move, so they are stable
-  React keys.
-- **String columns are dictionary-encoded.** Cells hold int32 ids;
-  the JS side keeps a mirror of the values and resolves ids locally.
+  delete writes a tombstone; surviving ids never move.
+- **String columns are dictionary-encoded.** Cells hold int32 ids; the JS
+  side keeps a mirror of the values and resolves ids locally.
+- **The hook names the mode.** `Sync` runs the engine on the main thread,
+  `Async` in a worker. There is no mode option anywhere.
 
 ## Install
 
@@ -29,18 +36,18 @@ npm install use-wasm-state
 
 React 18 or later is a peer dependency.
 
-## Hooks
+## A one-off grid
 
 ```tsx
-import { defineSchema, useWasmTable, useTableView } from "use-wasm-state";
+import { defineSchema, useDataGridView, useWasmDataGridSync } from "use-wasm-state/datagrid";
 
 const schema = defineSchema({ id: "i32", name: "string", price: "f64" });
 
 function Rows() {
-  const { status, table } = useWasmTable(schema, {
+  const { status, grid } = useWasmDataGridSync(schema, {
     initialRows: [{ id: 1, name: "Widget", price: 9.99 }],
   });
-  const view = useTableView(table, 0, 50);
+  const view = useDataGridView(grid, 0, 50);
 
   if (status !== "ready") return null;
   return (
@@ -55,116 +62,136 @@ function Rows() {
 }
 ```
 
-### `defineSchema(spec)`
+Given a schema, the creation hook owns a private engine with one grid in
+it, and disposes both on unmount.
 
-`spec` maps column name to `"i32" | "f64" | "string"`. Key order is column
-order. The row type is inferred: `Row<typeof schema.spec>`.
+## A shared grid
 
-### `useWasmTable(schema, options?)`
+```tsx
+import { WasmStateSyncProvider, useWasmStateSync } from "use-wasm-state";
+import { defineDataGrid, useDataGridStats, useWasmDataGridSync } from "use-wasm-state/datagrid";
 
-Creates a private engine with one table. Returns a discriminated union:
+// Module scope. Does nothing on its own: no engine, no wasm, SSR-safe.
+export const Orders = defineDataGrid("orders", schema, { initialRows });
+
+function App() {
+  return (
+    <WasmStateSyncProvider>
+      <Count />
+      <List />
+    </WasmStateSyncProvider>
+  );
+}
+
+function Count() {
+  const { grid } = useWasmDataGridSync(Orders); // same grid in every component
+  return <p>{useDataGridStats(grid)?.rowCount}</p>;
+}
+```
+
+- Given a `DataGridDef`, the creation hook returns the shared grid from the
+  provider of its mode: sync hooks read `WasmStateSyncProvider`, async
+  hooks `WasmStateAsyncProvider`. Nesting both works.
+- Created by the first hook that uses it, with `initialRows`. Lives as long
+  as the provider, not its components: every consumer can unmount and the
+  rows are still there.
+- `useWasmStateSync().drop(Orders)` (or `useWasmStateAsync()`) disposes it.
+  The next use recreates it, `initialRows` again; anything still showing it
+  gets the new one.
+- A def with no matching provider above it is an error through `status`,
+  code `no_provider`, naming the provider it needs.
+- Two different defs with the same key in one provider: `schema_mismatch`,
+  unless their columns are identical.
+- StrictMode: one engine per kind of state per provider, one grid per key,
+  `initialRows` inserted once.
+
+## Hooks (`use-wasm-state/datagrid`)
+
+### `useWasmDataGridSync(schemaOrDef, options?)`
+
+Returns a `DataGridStore`. Options, for a schema only: `wasmUrl`,
+`initialRows`. Read once, on mount.
+
+### `useWasmDataGridAsync(schemaOrDef, options?)`
+
+Returns an `AsyncDataGridStore`. Options, for a schema only: `wasmUrl`,
+`workerUrl`, `initialRows`.
+
+Both return a discriminated union:
 
 ```ts
-| { status: "loading"; isReady: false; table: null; error: null }
-| { status: "ready";   isReady: true;  table: TableStore<S>; error: null }
-| { status: "error";   isReady: false; table: null; error: Error }
+| { status: "loading"; isReady: false; grid: null; error: null }
+| { status: "ready";   isReady: true;  grid: T;    error: null }
+| { status: "error";   isReady: false; grid: null; error: Error }
 ```
 
 `isReady` narrows after destructuring; `status` narrows before.
 
-Options: `wasmUrl`, `workerUrl`, `initialRows`, `mode` (`"sync"` or
-`"worker"`), `shared` (not implemented). The schema is read once on mount.
-
-### `useTableView(table, start, count)`
+### `useDataGridView(grid, start, count)`
 
 One window, or `null` while loading. Re-renders when the revision moves.
 
-### `useTableStats(table)`
+### `useDataGridStats(grid)`
 
-`{ revision, rowCount, totalRows }` or `null`. For headers and status bars
-that must update without reading rows.
+`{ revision, rowCount, totalRows }` or `null`. For headers and status bars.
 
-### `useTableQuery(table)`
+### `useDataGridQuery(grid)`
 
 The current `{ sort, filters, search }` or `null`. For a toolbar.
 
-All three read hooks take a `TableReader`, which both store types satisfy.
+All three read hooks take a `DataGridReader`, which both stores satisfy.
 
 ## Sort, filter and search
 
-A table has one query, and the row order is what it produces:
+A grid has one query, and the row order is what it produces:
 
 ```
 live rows -> filters (AND) -> search -> sort
 ```
 
-It persists. Every mutation re-applies it, so an inserted row lands where
-the sort says and an edited one leaves a filter it no longer matches.
+It persists: every mutation re-applies it.
 
 ```tsx
-table.sortBy("price", "desc");
-table.filter([{ column: "status", op: "in", value: ["paid", "shipped"] }]);
-table.search("acme");
+grid.sortBy("price", "desc");
+grid.filter([{ column: "status", op: "in", value: ["paid", "shipped"] }]);
+grid.search("acme");
 
-table.setQuery({
+grid.setQuery({
   sort: [{ column: "status" }, { column: "price", direction: "desc" }],
   filters: [{ column: "price", op: "between", value: [10, 100] }],
   search: "acme",
 });
 
-table.clearQuery();
+grid.clearQuery();
 ```
 
 `sortBy`, `filter` and `search` each replace one part and keep the rest;
 `setQuery` replaces the whole thing and clears what you leave out.
 
-Operators are typed by the column they name. Numbers take `eq`, `ne`, `lt`,
-`le`, `gt`, `ge` and `between`; strings take `eq`, `ne`, `in` and
-`contains`. `contains` and `search` are case-insensitive, and `search`
-looks at every string column.
+Numbers take `eq`, `ne`, `lt`, `le`, `gt`, `ge` and `between`; strings take
+`eq`, `ne`, `in` and `contains`. `contains` and `search` are
+case-insensitive, and `search` looks at every string column. Sorting is
+multi-column, stable, and ties break by row id.
 
-Sorting is multi-column, stable, and ties break by row id. It runs on
-unsigned keys rather than values, so a string column sorts by a cached rank
-per dictionary entry and a 200k-row sort is one pass over the rows.
-
-`useTableQuery(table)` gives a toolbar the active query, reactive on the
-same revision the rows are.
-
-## Worker mode
+## Async
 
 ```tsx
-const { status, table } = useWasmTable(schema, { mode: "worker" });
+const { status, grid } = useWasmDataGridAsync(schema);
+await grid.setCell(rowId, "price", 12.5);
+await grid.sortBy("price", "desc");
 ```
 
-The engine moves off the main thread. Reads stay synchronous, because the
-worker sends rows for every window on screen with each reply, so one round
-trip covers a whole user action. Mutations return Promises, because they
-really do cross a thread:
+Reads stay synchronous, because the worker sends rows for every window on
+screen with each reply. Mutations return Promises. While a window is in
+flight the store answers with the nearest rows it has, carrying their own
+`start`, so a grid draws them where they belong rather than blanking.
 
-```tsx
-await table.setCell(rowId, "price", 12.5);
-await table.sortBy("price", "desc");
-```
+A component that awaits every mutation it makes can take
+`AnyDataGridStore<S>` (either store) and run under both modes unchanged.
 
-The option types the result: `mode: "worker"` gives an `AsyncTableStore`,
-anything else a `TableStore`. Both satisfy `TableReader`, which is what
-`useTableView`, `useTableStats` and `useTableQuery` take, so a component
-that only reads does not care which it was handed.
+## Stores
 
-While a window is in flight the store answers with the nearest rows it
-already has, carrying their own `start`, so a grid draws them where they
-belong rather than blanking.
-
-The worker bundle is resolved with `new URL("./worker.js", import.meta.url)`,
-the same way `engine.wasm` is. Pass `workerUrl` where a CSP names an
-explicit `worker-src`.
-
-## Store
-
-`createEngine(options?) -> Promise<Engine>` for use outside React.
-`engine.createTable(schema) -> TableStore`, `engine.dispose()`.
-
-### `TableStore<S>`
+### `DataGridStore<S>` (sync)
 
 ```ts
 insertRows(rows: Row<S>[]): RowIds
@@ -172,12 +199,12 @@ insertColumns(columns: ColumnsInput<S>): RowIds
 setCell(rowId, column, value): void
 deleteRows(rowIds: ArrayLike<number>): void
 
-setQuery(query: TableQuery<S>): void      // replaces the whole query
+setQuery(query: DataGridQuery<S>): void   // replaces the whole query
 sortBy(column, direction?): void          // no direction clears the sort
 filter(clauses: FilterClause<S>[]): void
 search(text: string): void
 clearQuery(): void
-readonly query: Required<TableQuery<S>>
+readonly query: Required<DataGridQuery<S>>
 
 readonly revision: number
 readonly version: number     // subscription token; moves on any visible change
@@ -185,17 +212,19 @@ readonly lastCallMs: number  // what the last engine call cost, engine time only
 readonly rowCount: number    // live rows
 readonly totalRows: number   // including tombstones
 
-view(start, count): TableView<S>              // best-effort
-readWindow(start, count): Promise<TableView<S>>  // the real rows
-watch(start, count): () => void               // this window is on screen
+view(start, count): DataGridView<S>                 // best-effort
+readWindow(start, count): Promise<DataGridView<S>>  // the real rows
+watch(start, count): () => void                     // this window is on screen
 subscribe(listener: () => void): () => void
 dispose(): void
 ```
 
+`AsyncDataGridStore<S>` is the same with every mutation returning a Promise.
+
 `RowIds` describes a contiguous run: `{ first, length, at(i), toArray() }`
 and iterates. Ids are not materialised as an array.
 
-### `TableView<S>`
+### `DataGridView<S>`
 
 ```ts
 readonly start: number     // after clamping, not what you asked for
@@ -209,11 +238,21 @@ rows(): Row<S>[]
 `view(start, count)` returns the identical object for the same
 `(revision, start, count)`.
 
+## Providers (`use-wasm-state`)
+
+`<WasmStateSyncProvider urls?>` and `<WasmStateAsyncProvider urls?>`. No mode
+prop: the provider is the mode. `urls` overrides where each kind of state's
+engine is fetched from, keyed by its name, read once on mount:
+
+```tsx
+<WasmStateAsyncProvider urls={{ datagrid: { wasmUrl, workerUrl } }}>
+```
+
 ### `WasmStateError`
 
 `{ code, status, op }`. Codes: `bad-handle`, `out-of-range`, `row-deleted`,
 `wrong-type`, `row-count`, `bad-schema`, `bad-argument`, `disposed`,
-`not_implemented`, `engine`.
+`schema_mismatch`, `no_provider`, `engine`.
 
 ## Performance rules
 
@@ -224,7 +263,6 @@ rows(): Row<S>[]
   the columns for you.
 - **One crossing per user action or frame.** `setCell`, `view(start, count)`.
 - **Load once, then query.** The data stays in Go.
-- **Never cache a typed-array view on `memory.buffer`.** A grow detaches it.
 - **Row ids, not offsets.** Offsets shift when rows are deleted.
 - **Key virtualised rows by their slot, not their row id.** A sort or a
   filter changes every visible id, and id keys make React destroy and
@@ -232,19 +270,17 @@ rows(): Row<S>[]
   right for a list that is not virtualised, where a row keeps its identity.
 - **Windows are clamped, never rejected.** Read `view.start` to find out
   where a window actually begins.
+- **Async inputs are uncontrolled.** A controlled input waiting a round trip
+  for its own value drops keystrokes; use `defaultValue`.
 
-## Serving engine.wasm
+## Serving the engine
 
-Resolved by default with `new URL("./engine.wasm", import.meta.url)`, which
-Vite and webpack 5 understand and which keeps the streaming compile. Pass
-`wasmUrl` for a CDN, a strict CSP, or a bundler that cannot resolve the
-asset. The CJS build ships a shim for `import.meta.url`; if your bundler
-still cannot resolve it, pass `wasmUrl`.
+`datagrid.wasm` and `datagrid.worker.js` are resolved beside the datagrid
+bundle with `new URL("./…", import.meta.url)`, which Vite and webpack 5
+understand and which keeps the streaming compile. Pass `wasmUrl` and
+`workerUrl` (to a one-off hook, or per pattern to a provider's `urls`) for a
+CDN, a strict CSP, or a bundler that cannot resolve the assets. The CJS
+build ships a shim for `import.meta.url`.
 
-The module imports nothing from the host and runs identically on the main
+The engine imports nothing from the host and runs identically on the main
 thread, in a worker, and in Node.
-
-## What is not built yet
-
-`options.shared`. It reports a `WasmStateError` with code
-`not_implemented` rather than failing quietly.

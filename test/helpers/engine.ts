@@ -1,8 +1,8 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { vi } from "vitest";
-import { instantiateModule } from "../../src/internal/wasm/loader";
-import { unpack } from "../../src/internal/wasm/memory";
+import { instantiateModule } from "../../src/core/wasm/loader";
+import { unpack } from "../../src/core/wasm/memory";
 import {
   ColumnType,
   decodeDict,
@@ -14,28 +14,28 @@ import {
   type DecodedView,
   type EngineExports,
   type WireQuery,
-} from "../../src/engine/abi";
-import { bytesIn, f64In, i32In, stringIn, u32In, withInput } from "../../src/engine/input";
+} from "../../src/datagrid/abi";
+import { bytesIn, f64In, i32In, stringIn, u32In, withInput } from "../../src/core/wasm/input";
 
 /**
- * Harness for driving the real engine.wasm from Node.
+ * Harness for driving the real datagrid.wasm from Node.
  *
- * Everything here does what src/engine/sync-client.ts will do in build step
- * 5. In particular it goes through withInput for every call that passes
- * data in, and never calls alloc or free: that is the memory model the
- * engine is built around, so the tests have to exercise it rather than a
- * friendlier path of their own.
+ * Everything here does what src/datagrid/sync-client.ts does. In
+ * particular it goes through withInput for every call that passes data in,
+ * and never calls alloc or free: that is the memory model the engine is
+ * built around, so the tests have to exercise it rather than a friendlier
+ * path of their own.
  */
 
-/** The URL serveEngine() answers. Pass it as wasmUrl to createEngine. */
-export const ENGINE_URL = "https://engine.test/engine.wasm";
-const ENGINE_PATH = resolve(process.cwd(), "src/wasm/engine.wasm");
+/** The URL serveEngine() answers. Pass it as a wasmUrl. */
+export const ENGINE_URL = "https://engine.test/datagrid.wasm";
+const ENGINE_PATH = resolve(process.cwd(), "src/datagrid/datagrid.wasm");
 
 /**
  * Serve the committed engine over a stubbed fetch, so the module is loaded
- * through the copied loader rather than around it. Node's fetch cannot read
- * a file: URL, and compiling the bytes directly here would leave the loader
- * untested against the thing it actually has to load.
+ * through the package's own loader rather than around it. Node's fetch
+ * cannot read a file: URL, and compiling the bytes directly here would leave
+ * the loader untested against the thing it actually has to load.
  */
 export function serveEngine(): void {
   vi.stubGlobal("fetch", async () => {

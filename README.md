@@ -4,14 +4,13 @@ React state that lives in a WebAssembly engine written in Go.
 
 Storing arbitrary JS values in wasm is slower than `useState`, because every
 read and write has to serialise. Wasm state only pays off when the operations
-on the state also run in wasm. So this is not generic state: it ships a
-prebuilt engine and exposes specialised data structures whose work happens in
-Go, with only what React needs to render crossing back to JS.
+on the state also run in wasm. So this is not generic state: each kind of
+state ships its own prebuilt engine and does its work in Go, with only what
+React needs to render crossing back to JS.
 
-First structure: a table. Sort, filter and search 200k rows while you scroll.
+First kind: a datagrid. Sort, filter and search 200k rows while you scroll.
 
-> **Status: early.** Not published yet. Shared tables are not built yet.
-> See the build order below.
+> **Status: early.** Not published yet. See the build order below.
 
 ## Install
 
@@ -19,24 +18,28 @@ First structure: a table. Sort, filter and search 200k rows while you scroll.
 npm install use-wasm-state
 ```
 
-## A table in twenty lines
+Two entry points: `use-wasm-state` holds what every kind of state shares,
+the providers and `WasmStateError`; `use-wasm-state/datagrid` holds the grid,
+its hooks, its engine and its worker.
+
+## A grid in twenty lines
 
 ```tsx
-import { defineSchema, useWasmTable, useTableView } from "use-wasm-state";
+import { defineSchema, useDataGridView, useWasmDataGridSync } from "use-wasm-state/datagrid";
 
 const schema = defineSchema({ item: "string", qty: "i32", price: "f64" });
 
 export function Basket() {
-  const { status, table } = useWasmTable(schema, {
+  const { status, grid } = useWasmDataGridSync(schema, {
     initialRows: [{ item: "Keyboard", qty: 2, price: 89 }],
   });
-  const view = useTableView(table, 0, 50);
+  const view = useDataGridView(grid, 0, 50);
 
   if (status !== "ready") return null;
 
   return (
     <>
-      <button onClick={() => table.insertRows([{ item: "Cable", qty: 8, price: 4.25 }])}>
+      <button onClick={() => grid.insertRows([{ item: "Cable", qty: 8, price: 4.25 }])}>
         Add
       </button>
       <ul>
@@ -58,16 +61,16 @@ is slower than `useState`. It only pays off when the operations on the
 state run in wasm too. So Go owns the rows, the string dictionaries and the
 row order; React owns the scroll position and the selection.
 
-A counter on the table bumps on every mutation, `useSyncExternalStore`
+A counter on the grid bumps on every mutation, `useSyncExternalStore`
 watches that counter, and each component reads back only the rows it is
 showing.
 
 ```tsx
 // 200,000 rows live in Go. Fifty cross to JS.
-const view = useTableView(table, Math.floor(scrollTop / 32), 50);
+const view = useDataGridView(grid, Math.floor(scrollTop / 32), 50);
 
 // An edit is one call and one revision bump.
-table.setCell(rowId, "price", 12.5);
+grid.setCell(rowId, "price", 12.5);
 ```
 
 Row ids are permanent positions, so a row keeps its identity across edits
@@ -77,7 +80,7 @@ every visible id, and id keys would make React rebuild every cell.
 
 ## Sort, filter and search
 
-A table has one query, and the row order is what it produces:
+A grid has one query, and the row order is what it produces:
 
 ```
 live rows -> filters (AND) -> search -> sort
@@ -87,17 +90,17 @@ It persists. Every mutation re-applies it, so an inserted row lands where
 the sort says and an edited one leaves a filter it no longer matches.
 
 ```tsx
-table.sortBy("price", "desc");
-table.filter([{ column: "status", op: "in", value: ["paid", "shipped"] }]);
-table.search("acme");
+grid.sortBy("price", "desc");
+grid.filter([{ column: "status", op: "in", value: ["paid", "shipped"] }]);
+grid.search("acme");
 
-table.setQuery({
+grid.setQuery({
   sort: [{ column: "status" }, { column: "price", direction: "desc" }],
   filters: [{ column: "price", op: "between", value: [10, 100] }],
   search: "acme",
 });
 
-table.clearQuery();
+grid.clearQuery();
 ```
 
 `sortBy`, `filter` and `search` each replace one part and keep the rest;
@@ -112,55 +115,93 @@ Sorting is multi-column, stable, and ties break by row id. It runs on
 unsigned keys rather than values, so a string column sorts by a cached rank
 per dictionary entry and a 200k-row sort is one pass over the rows.
 
-`useTableQuery(table)` gives a toolbar the active query, reactive on the
+`useDataGridQuery(grid)` gives a toolbar the active query, reactive on the
 same revision the rows are.
 
-## Sync mode
+## On the main thread, or in a worker
 
-The engine runs on the main thread, so a viewport is read during render and
-a mutation is visible on the next line. That is the default.
+The hook names the mode. There is no mode option.
 
-## Worker mode
+`useWasmDataGridSync` runs the engine on the main thread, so a viewport is
+read during render and a mutation is visible on the next line.
 
-```tsx
-const { status, table } = useWasmTable(schema, { mode: "worker" });
-```
-
-The engine moves off the main thread. Reads stay synchronous, because the
-worker sends rows for every window on screen with each reply, so one round
-trip covers a whole user action. Mutations return Promises, because they
-really do cross a thread:
+`useWasmDataGridAsync` moves it into a worker. Reads stay synchronous,
+because the worker sends rows for every window on screen with each reply,
+so one round trip covers a whole user action. Mutations return Promises,
+because they really do cross a thread:
 
 ```tsx
-await table.setCell(rowId, "price", 12.5);
-await table.sortBy("price", "desc");
+const { status, grid } = useWasmDataGridAsync(schema);
+
+await grid.setCell(rowId, "price", 12.5);
+await grid.sortBy("price", "desc");
 ```
 
-The option types the result: `mode: "worker"` gives an `AsyncTableStore`,
-anything else a `TableStore`. Both satisfy `TableReader`, which is what
-`useTableView`, `useTableStats` and `useTableQuery` take, so a component
-that only reads does not care which it was handed.
+The first gives a `DataGridStore`, the second an `AsyncDataGridStore`. Both
+satisfy `DataGridReader`, which is what `useDataGridView`,
+`useDataGridStats` and `useDataGridQuery` take, so a component that only
+reads does not care which it was handed. A component that awaits every
+mutation it makes can take `AnyDataGridStore` and run under either mode
+unchanged; on a sync store the `await` costs a microtask and nothing else.
 
-While a window is in flight the store answers with the nearest rows it
-already has, carrying their own `start`, so a grid draws them where they
+While a window is in flight the async store answers with the nearest rows
+it already has, carrying their own `start`, so a grid draws them where they
 belong rather than blanking.
 
-The worker bundle is resolved with `new URL("./worker.js", import.meta.url)`,
-the same way `engine.wasm` is. Pass `workerUrl` where a CSP names an
-explicit `worker-src`.
-
-## Serving engine.wasm
-
-The engine is a 55 kB module that imports nothing. It is resolved with
-`new URL("./engine.wasm", import.meta.url)`, which Vite and webpack 5 both
-understand and which keeps the streaming compile.
+## Sharing a grid
 
 ```tsx
-useWasmTable(schema, { wasmUrl: "https://cdn.example.com/engine.wasm" });
+import { WasmStateSyncProvider } from "use-wasm-state";
+import { defineDataGrid, useDataGridStats, useWasmDataGridSync } from "use-wasm-state/datagrid";
+
+// Once, at module scope. Nothing loads until a component uses it.
+export const Orders = defineDataGrid("orders", schema, { initialRows });
+
+export function App() {
+  return (
+    <WasmStateSyncProvider>
+      <OrderCount />
+      <OrderList />
+    </WasmStateSyncProvider>
+  );
+}
+
+function OrderCount() {
+  // The same grid in every component that names it.
+  const { grid } = useWasmDataGridSync(Orders);
+  return <p>{useDataGridStats(grid)?.rowCount}</p>;
+}
+```
+
+A definition carries its schema with its key, so two components naming a
+grid cannot disagree about its shape. The provider creates the grid the
+first time a component asks, hands every component the same one, and keeps
+it until the provider unmounts: the rows survive every component that
+showed them going away. `useWasmStateSync().drop(Orders)` throws it away,
+and the next use starts again from `initialRows`.
+
+In a worker it is the same code with `WasmStateAsyncProvider` and
+`useWasmDataGridAsync`. Each hook reads the provider of its own mode, so
+both can be nested. A definition with no provider of its mode above it is
+an error through `status`, code `no_provider`; two different definitions
+under one key are `schema_mismatch`, unless their columns are identical.
+
+## Serving the engine
+
+The datagrid's engine is `datagrid.wasm`, a 55 kB module that imports
+nothing, and its worker is `datagrid.worker.js`. Both are resolved beside
+the datagrid bundle with `new URL("./…", import.meta.url)`, which Vite and
+webpack 5 both understand and which keeps the streaming compile.
+
+```tsx
+useWasmDataGridSync(schema, { wasmUrl: "https://cdn.example.com/datagrid.wasm" });
+
+<WasmStateAsyncProvider urls={{ datagrid: { wasmUrl, workerUrl } }}>
 ```
 
 The CJS build ships a shim for `import.meta.url`; if a bundler still cannot
-resolve the asset, pass `wasmUrl`.
+resolve the assets, pass the URLs. `workerUrl` is also the escape hatch for
+a CSP that names an explicit `worker-src`.
 
 There is a [full API reference and live examples](https://kezanwar.github.io/use-wasm-state/),
 and [llm.md](./llm.md) is a compact brief to paste into a chat before asking
@@ -171,16 +212,16 @@ an assistant for code.
 ```
 engine/    Go source for the bundled wasm. `table` is pure Go and tests with
            plain `go test`; main.go is the thin ABI layer on top.
-src/       the npm package: engine clients, stores, React hooks.
-           `internal/wasm` is the generic half, a module loader and the
-           pointer arithmetic, and is not re-exported.
+src/       the npm package. `core` is the root entry, what every kind of
+           state shares: providers, errors, wasm loading and the worker
+           plumbing. `datagrid` is the first kind, with its engine.
 test/      vitest.
 e2e/       Playwright, for the things only a browser can run.
 examples/  the Vite docs site: getting started, live examples, API.
 scripts/   build and audit the .wasm.
 ```
 
-`src/wasm/engine.wasm` is committed, so the tests and the demo run without
+`src/datagrid/datagrid.wasm` is committed, so the tests and the demo run without
 TinyGo installed. Rebuild it only when `engine/` changes.
 
 The engine core is plain Go with no wasm in it, so `pnpm test:go` needs no
@@ -208,7 +249,7 @@ one changed cell can move a row anywhere in it.
 ### Memory
 
 Built with TinyGo's `-gc=precise`, not this target's default `leaking`
-collector, so a long-lived table gives memory back. Over 400k rows arriving
+collector, so a long-lived grid gives memory back. Over 400k rows arriving
 in batches, precise holds at 16MB of linear memory where leaking reaches
 32MB, and it costs 1.4x on the one bulk insert. `-gc=conservative` holds the
 same memory but takes a 200k-row insert to 1,700ms. The reasoning is in
@@ -224,7 +265,7 @@ same memory but takes a 200k-row insert to 1,700ms. The reasoning is in
 | `pnpm test:browser` | Playwright |
 | `pnpm typecheck` | package and demo |
 | `pnpm build` | tsup -> dist |
-| `pnpm build:wasm` | TinyGo -> `src/wasm/engine.wasm`, then audit it |
+| `pnpm build:wasm` | TinyGo -> `src/datagrid/datagrid.wasm`, then audit it |
 | `pnpm inspect:wasm` | list the engine's imports and exports |
 
 `build:wasm` needs TinyGo: `brew tap tinygo-org/tools && brew install tinygo`.
@@ -236,11 +277,11 @@ Nothing else does.
 2. ~~`internal/wasm` loader and memory helpers, with tests~~
 3. ~~Go `table` package: schema, insert, view~~
 4. ~~ABI in `main.go`, build, `abi.test.ts`~~
-5. ~~`SyncClient` + `TableStore` + `useWasmTable` / `useTableView`~~
+5. ~~`SyncClient`, the store and the creation and read hooks~~
 6. ~~Demo grid with 200k rows~~
 7. ~~Sort, filter, search in Go~~
 8. ~~`WorkerClient` + worker mode~~
-9. Provider / shared tables
+9. ~~Providers and shared grids~~
 10. Benchmarks against a plain JS implementation, docs
 
 ## Licence

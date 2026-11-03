@@ -1,4 +1,4 @@
-// Package table is the columnar store behind useWasmTable.
+// Package table is the columnar store behind use-wasm-state/datagrid.
 //
 // An Engine holds many tables by handle. A table is created from an ordered
 // schema and stores each column as one flat slice: []int32 for i32, []float64
