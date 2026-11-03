@@ -14,6 +14,7 @@ import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { argv, exit } from "node:process";
 import { fileURLToPath } from "node:url";
+import { winners } from "../examples/react-demo/src/bench/winners.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const README = resolve(root, "README.md");
@@ -38,6 +39,8 @@ export function formatMs(ms) {
 
 export const formatMB = (bytes) => `${(bytes / 1e6).toFixed(1)} MB`;
 
+const bold = (cells, wins) => cells.map((text, i) => (wins[i] ? `**${text}**` : text));
+
 /** Reserved linear memory, and the engine's live heap within it. */
 export function formatWasmMemory({ wasm, wasmLive }) {
   if (wasm === null) return "";
@@ -52,24 +55,20 @@ export function renderBlock(figures, wasmBytes) {
     "",
     `Median of ${figures.repeats} runs over ${figures.rows.toLocaleString("en-US")} rows, on ` +
       `${machine.cpu} (${machine.cores} cores, ${machine.memoryGB} GB), ${machine.os}, ` +
-      `${runtime.name} ${runtime.version}, ${figures.measured}. Fastest in bold.`,
+      `${runtime.name} ${runtime.version}, ${figures.measured}. Best in bold, with anything within 5% of it.`,
     "",
     `| | ${IMPLS.map(([, label]) => label).join(" | ")} |`,
     `| --- | ${IMPLS.map(() => "---:").join(" | ")} |`,
   ];
 
   for (const op of figures.operations) {
-    const best = Math.min(...IMPLS.map(([id]) => op.results[id].median));
-    const cells = IMPLS.map(([id]) => {
-      const text = formatMs(op.results[id].median);
-      return op.results[id].median === best ? `**${text}**` : text;
-    });
-    lines.push(`| ${op.label} | ${cells.join(" | ")} |`);
+    const values = IMPLS.map(([id]) => op.results[id].median);
+    lines.push(`| ${op.label} | ${bold(values.map(formatMs), winners(values)).join(" | ")} |`);
   }
 
   const js = IMPLS.map(([id]) => figures.memory[id].js);
   if (js.every((bytes) => bytes !== null)) {
-    lines.push(`| JS memory after load | ${js.map(formatMB).join(" | ")} |`);
+    lines.push(`| JS memory after load | ${bold(js.map(formatMB), winners(js)).join(" | ")} |`);
   }
   lines.push(
     `| Wasm memory after load, reserved / live | ${IMPLS.map(([id]) =>

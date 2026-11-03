@@ -13,11 +13,15 @@ import { formatMB, formatMs } from "@/bench/format";
 import { frameBudget, measureFrames, type FrameCost } from "@/bench/frames";
 import { implementations, LABELS } from "@/bench/implementations";
 import type { ImplId, MemoryResult, Results } from "@/bench/runner";
+import { winners } from "@/bench/winners.mjs";
 import { generateOrders, orders } from "@/lib/orders";
 
 type Schema = typeof orders.spec;
 
 const IMPLS: ImplId[] = ["typical", "tuned", "wasm"];
+
+/** A winning value: the wasm accent, and bold so it never rests on colour alone. */
+const WIN = "text-wasm font-semibold";
 
 /** ?quick shrinks the run to seconds, for the browser tests. */
 const QUICK = typeof location !== "undefined" && new URLSearchParams(location.search).has("quick");
@@ -192,17 +196,14 @@ function FiguresTable({
         </thead>
         <tbody className="tabular">
           {results.operations.map((op) => {
-            const best = Math.min(...IMPLS.map((id) => op.results[id].median));
+            const wins = winners(IMPLS.map((id) => op.results[id].median));
             return (
               <tr key={op.id} className="border-border/50 border-t">
                 <td className="text-muted-foreground py-1 pr-2">{op.label}</td>
-                {IMPLS.map((id) => (
+                {IMPLS.map((id, i) => (
                   <td
                     key={id}
-                    className={cn(
-                      "py-1 text-right",
-                      op.results[id].median === best && "text-foreground font-semibold"
-                    )}
+                    className={cn("py-1 text-right", wins[i] && WIN)}
                     title={`p95 ${formatMs(op.results[id].p95)}`}
                   >
                     {formatMs(op.results[id].median)}
@@ -215,6 +216,7 @@ function FiguresTable({
             <MemoryRow
               label="JS memory"
               cells={IMPLS.map((id) => formatMB(results.memory[id]!.js!))}
+              wins={winners(IMPLS.map((id) => results.memory[id]!.js))}
             />
           )}
           <MemoryRow
@@ -240,12 +242,12 @@ function wasmMemory(memory: MemoryResult | undefined): string {
     : `${formatMB(memory.wasm)} / ${formatMB(memory.wasmLive)}`;
 }
 
-function MemoryRow({ label, cells }: { label: string; cells: string[] }) {
+function MemoryRow({ label, cells, wins }: { label: string; cells: string[]; wins?: boolean[] }) {
   return (
     <tr className="border-border/50 border-t">
       <td className="text-muted-foreground py-1 pr-2">{label}</td>
       {cells.map((text, i) => (
-        <td key={i} className="py-1 text-right">
+        <td key={i} className={cn("py-1 text-right", wins?.[i] && WIN)}>
           {text}
         </td>
       ))}
@@ -254,6 +256,9 @@ function MemoryRow({ label, cells }: { label: string; cells: string[] }) {
 }
 
 function FramesTable({ frames, rows }: { frames: Record<FrameId, FrameCost>; rows: number }) {
+  // Each column is its own contest: shortest longest frame, fewest dropped.
+  const worst = winners(FRAME_ROWS.map(({ id }) => frames[id].worst));
+  const dropped = winners(FRAME_ROWS.map(({ id }) => frames[id].dropped));
   return (
     <table className="w-full max-w-lg text-xs" data-testid="bench-frames">
       <thead className="text-muted-foreground">
@@ -266,11 +271,11 @@ function FramesTable({ frames, rows }: { frames: Record<FrameId, FrameCost>; row
         </tr>
       </thead>
       <tbody className="tabular">
-        {FRAME_ROWS.map(({ id, label }) => (
+        {FRAME_ROWS.map(({ id, label }, i) => (
           <tr key={id} className="border-border/50 border-t">
             <td className="py-1">{label}</td>
-            <td className="py-1 text-right">{formatMs(frames[id].worst)}</td>
-            <td className="py-1 text-right">{frames[id].dropped}</td>
+            <td className={cn("py-1 text-right", worst[i] && WIN)}>{formatMs(frames[id].worst)}</td>
+            <td className={cn("py-1 text-right", dropped[i] && WIN)}>{frames[id].dropped}</td>
           </tr>
         ))}
       </tbody>
