@@ -609,3 +609,123 @@ func TestPackedInsertRejectsBadOffsets(t *testing.T) {
 		})
 	}
 }
+
+// withBuckets runs fn with the dictionary squeezed into n buckets, so every
+// lookup has to walk a bucket holding values that are not it.
+func withBuckets(t *testing.T, n uint64, fn func()) {
+	t.Helper()
+	saved := hashMask
+	hashMask = n - 1
+	defer func() { hashMask = saved }()
+	fn()
+}
+
+func TestDictionaryUnderForcedCollisions(t *testing.T) {
+	// Two buckets for a few hundred values: nearly every lookup walks past
+	// something it must not match.
+	withBuckets(t, 2, func() {
+		tbl := newTestTable(t, Schema{{Name: "s", Type: String}})
+
+		const n = 300
+		values := make([]string, n)
+		for i := range values {
+			values[i] = "value-" + string(rune('a'+i%26)) + "-" + itoa(i)
+		}
+		if _, err := tbl.InsertColumns([]ColumnData{{Strings: values}}); err != nil {
+			t.Fatalf("InsertColumns: %v", err)
+		}
+
+		// Every distinct value got its own id, and no two values share one.
+		if got, _ := tbl.DictLen(0); got != n {
+			t.Fatalf("DictLen() = %d, want %d: collisions merged distinct values", got, n)
+		}
+
+		dict, err := tbl.DictSince(0, 0)
+		if err != nil {
+			t.Fatalf("DictSince: %v", err)
+		}
+		if len(dict) != n {
+			t.Fatalf("DictSince returned %d values, want %d", len(dict), n)
+		}
+
+		// Every row resolves back to the string it was given.
+		v := tbl.View(0, n)
+		for i, id := range v.Cols[0].I32 {
+			if dict[id] != values[i] {
+				t.Fatalf("row %d has id %d -> %q, want %q", i, id, dict[id], values[i])
+			}
+		}
+
+		// Re-interning an existing value finds it rather than appending,
+		// through both the string and the bytes path.
+		for i := 0; i < n; i += 7 {
+			if err := tbl.SetString(int32(i), 0, values[i]); err != nil {
+				t.Fatalf("SetString: %v", err)
+			}
+			if err := tbl.SetStringBytes(int32(i), 0, []byte(values[i])); err != nil {
+				t.Fatalf("SetStringBytes: %v", err)
+			}
+		}
+		if got, _ := tbl.DictLen(0); got != n {
+			t.Fatalf("DictLen() = %d after re-interning known values, want %d", got, n)
+		}
+
+		// A genuinely new value still appends, and DictSince reports just it.
+		before, _ := tbl.DictLen(0)
+		if err := tbl.SetStringBytes(0, 0, []byte("brand new")); err != nil {
+			t.Fatalf("SetStringBytes: %v", err)
+		}
+		added, _ := tbl.DictSince(0, before)
+		if len(added) != 1 || added[0] != "brand new" {
+			t.Fatalf("DictSince(%d) = %v, want [brand new]", before, added)
+		}
+	})
+}
+
+func TestDictionaryCollisionsDoNotLeakAcrossColumns(t *testing.T) {
+	withBuckets(t, 1, func() {
+		tbl := newTestTable(t, Schema{
+			{Name: "a", Type: String},
+			{Name: "b", Type: String},
+		})
+		if _, err := tbl.InsertColumns([]ColumnData{
+			{Strings: []string{"x", "y"}},
+			{Strings: []string{"y", "z"}},
+		}); err != nil {
+			t.Fatalf("InsertColumns: %v", err)
+		}
+
+		// One bucket per column, not one shared bucket: "y" is id 1 in a
+		// and id 0 in b, and an index keyed only by hash must not confuse
+		// them.
+		a, _ := tbl.DictSince(0, 0)
+		b, _ := tbl.DictSince(1, 0)
+		if !equalStrings(a, []string{"x", "y"}) {
+			t.Fatalf("column a dictionary = %v, want [x y]", a)
+		}
+		if !equalStrings(b, []string{"y", "z"}) {
+			t.Fatalf("column b dictionary = %v, want [y z]", b)
+		}
+
+		v := tbl.View(0, 2)
+		if v.Cols[0].I32[1] != 1 || v.Cols[1].I32[0] != 0 {
+			t.Fatalf("ids = %v / %v", v.Cols[0].I32, v.Cols[1].I32)
+		}
+	})
+}
+
+// itoa avoids strconv, which is not worth pulling into the engine's test
+// binary for this.
+func itoa(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	var b [8]byte
+	i := len(b)
+	for n > 0 {
+		i--
+		b[i] = byte('0' + n%10)
+		n /= 10
+	}
+	return string(b[i:])
+}

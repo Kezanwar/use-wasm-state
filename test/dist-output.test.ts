@@ -41,9 +41,28 @@ describe.skipIf(!built)("dist", () => {
 
   it("declares every public export in the types", () => {
     const types = readFileSync(dist("index.d.ts"), "utf8");
-    for (const name of ["VERSION"]) {
+    for (const name of [
+      "createEngine",
+      "defineSchema",
+      "useWasmTable",
+      "useTableView",
+      "WasmStateError",
+      "TableStore",
+      "TableView",
+      "Row",
+      "RowIds",
+    ]) {
       expect(types, name).toContain(name);
     }
+  });
+
+  it("leaves no bare import.meta in the CJS bundle", () => {
+    // createEngine resolves its default engine.wasm with
+    // new URL("./engine.wasm", import.meta.url). CJS has no import.meta,
+    // so tsup's `shims` rewrites it; without that the bundle throws on
+    // require() before a consumer can even pass wasmUrl instead.
+    const cjs = readFileSync(dist("index.cjs"), "utf8");
+    expect(cjs).not.toMatch(/\bimport\s*\.\s*meta\b/);
   });
 
   it("keeps the internal helpers out of the public types", () => {
@@ -62,9 +81,8 @@ describe.skipIf(!built)("dist", () => {
     expect(pkg.sideEffects).toBe(false);
   });
 
-  it("reports the version the package.json declares", async () => {
-    const pkg = JSON.parse(readFileSync(resolve(root, "package.json"), "utf8"));
-    const { VERSION } = await import("../src/index");
-    expect(VERSION).toBe(pkg.version);
+  it("keeps react external", () => {
+    expect(readFileSync(dist("index.js"), "utf8")).toMatch(/from ["']react["']/);
+    expect(readFileSync(dist("index.cjs"), "utf8")).toMatch(/require\(["']react["']\)/);
   });
 });

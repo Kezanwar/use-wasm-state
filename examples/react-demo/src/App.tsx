@@ -1,4 +1,4 @@
-import { VERSION } from "use-wasm-state";
+import { defineSchema } from "use-wasm-state";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
@@ -9,6 +9,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
  * Replaced in build step 6 by the real thing, a 200k-row grid sorting and
  * filtering in Go.
  */
+const schema = defineSchema({ id: "i32", price: "f64", status: "string" });
+
 export function App() {
   return (
     <main className="mx-auto flex min-h-dvh max-w-3xl flex-col justify-center gap-8 px-6 py-16">
@@ -29,9 +31,9 @@ export function App() {
           </CardDescription>
         </CardHeader>
         <CardContent className="flex items-center gap-2 font-mono text-sm">
-          <span className="text-muted-foreground">use-wasm-state</span>
+          <span className="text-muted-foreground">columns</span>
           <span data-testid="package-version" className="tabular text-wasm">
-            v{VERSION}
+            {schema.names.join(", ")}
           </span>
         </CardContent>
       </Card>

@@ -13,6 +13,12 @@ export default defineConfig({
   // bundlers tree-shake it fine without this.
   treeshake: false,
   target: "es2022",
+  // createEngine resolves the default engine.wasm with
+  // new URL("./engine.wasm", import.meta.url). CJS has no import.meta, so
+  // tsup rewrites it to a __dirname-based equivalent. Without this the CJS
+  // bundle throws on load in Node. test/dist-output.test.ts asserts no
+  // bare import.meta survives into dist/index.cjs.
+  shims: true,
   // react stays external; it is a peer dependency, never bundled.
   external: ["react"],
   // Required for the Next.js App Router: the hooks are client-only.

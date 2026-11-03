@@ -1,13 +1,33 @@
 /**
  * Public surface of use-wasm-state.
  *
- * Nothing from src/internal/ is exported here on purpose: those files are
- * copies of react-use-wasm's helpers, kept private until they are extracted
- * into a shared core. Re-exporting them would make a second copy of that
- * API something we have to support.
- *
- * The hooks, the provider and the table types land in build steps 5 and 9.
+ * Everything under src/engine and src/internal stays private: the wire
+ * format, the allocator protocol and the copied react-use-wasm helpers are
+ * contracts between this package and its own module, not API. The one
+ * exception is WasmStateError, which a consumer has to be able to catch and
+ * name.
  */
 
-/** Package version, so the demo and bug reports can name an exact build. */
-export const VERSION = "0.0.0";
+export { createEngine } from "./store/create-engine";
+export type { Engine, EngineOptions } from "./store/create-engine";
+
+export { defineSchema } from "./store/schema";
+export type {
+  ColumnArray,
+  ColumnKind,
+  ColumnsInput,
+  Row,
+  SchemaSpec,
+  TableSchema,
+  ValueOf,
+} from "./store/schema";
+
+export type { RowIds, TableStore, TableView } from "./store/table-store";
+
+export { WasmStateError } from "./engine/errors";
+export type { WasmStateErrorCode } from "./engine/errors";
+
+export { useWasmTable } from "./react/use-wasm-table";
+export type { UseWasmTableOptions, UseWasmTableResult } from "./react/use-wasm-table";
+
+export { useTableView } from "./react/use-table-view";

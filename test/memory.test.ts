@@ -3,12 +3,14 @@ import { ColumnType, Status, type ColumnSpec, type EngineExports } from "../src/
 import {
   createTable,
   deleteRows,
+  dictPacked,
   insertColumns,
   newEngine,
   readDictSince,
   readView,
   serveEngine,
   setCellString,
+  viewPacked,
 } from "./helpers/engine";
 
 /**
@@ -211,6 +213,62 @@ describe("steady state", () => {
     expect(repeated.e.dictLen(repeated.h, 2)).toBe(LABELS.length);
     expect(fresh.e.dictLen(fresh.h, 2)).toBe(LABELS.length + EDITS);
     expect(readDictSince(fresh.e, fresh.h, 2, LABELS.length)![0]).toBe("distinct-0");
+  });
+
+  it("keeps its buffers reachable through repeated collection cycles", async () => {
+    const { e, h } = await loaded();
+
+    // Warm all three, then record where they live and what they hold.
+    const input = e.inputBuffer(4096);
+    const view = viewPacked(e, h, 100, 50)!;
+    const viewBefore = readView(e, h, 100, 50, SCHEMA)!;
+    const dictBefore = readDictSince(e, h, 2, 0)!;
+
+    // Churn hard enough to run the collector repeatedly: big blocks taken
+    // and dropped, thousands of new dictionary entries, rows coming and
+    // going. The three buffers are only reachable from package-level vars
+    // in the engine, so a precise collector that could not see them would
+    // hand back freed memory here rather than fail loudly.
+    for (let round = 0; round < 200; round++) {
+      const block = e.alloc(256 * 1024);
+      expect(block).toBeGreaterThan(0);
+      e.free(block);
+
+      expect(setCellString(e, h, round, 2, `gc-churn-${round}`)).toBe(Status.OK);
+      expect(deleteRows(e, h, [ROWS - 1 - round])).toBe(Status.OK);
+      readView(e, h, round * 7, 50, SCHEMA);
+      readDictSince(e, h, 2, 0);
+    }
+
+    // Same addresses: nothing was collected and reallocated underneath.
+    // The input and view buffers were asked for the same sizes throughout,
+    // so they had no reason to move at all.
+    expect(e.inputBuffer(4096)).toBe(input);
+    expect(viewPacked(e, h, 100, 50)!.ptr).toBe(view.ptr);
+
+    // The dictionary buffer did grow, because the churn added 200 entries
+    // and each delta was larger than the last. What has to hold is that it
+    // is stable once it stops growing.
+    const settled = dictPacked(e, h, 2, 0)!;
+    expect(dictPacked(e, h, 2, 0)!.ptr).toBe(settled.ptr);
+    expect(dictPacked(e, h, 2, 0)!.len).toBe(settled.len);
+
+    // The input buffer is still usable: written through and read back at
+    // the same address. Its *contents* are not checked, because the churn
+    // above made calls of its own and each one overwrites it. That is the
+    // documented contract, not a flaw.
+    new Uint8Array(e.memory.buffer, input, 4096).fill(0xab);
+    expect(new Uint8Array(e.memory.buffer, input, 4096).every((b) => b === 0xab)).toBe(true);
+
+    // And the outputs still decode to the right thing.
+    const viewAfter = readView(e, h, 100, 50, SCHEMA)!;
+    expect([...viewAfter.ids]).toEqual([...viewBefore.ids]);
+    expect([...viewAfter.columns[0]!]).toEqual([...viewBefore.columns[0]!]);
+    expect([...viewAfter.columns[1]!]).toEqual([...viewBefore.columns[1]!]);
+
+    const dictAfter = readDictSince(e, h, 2, 0)!;
+    expect(dictAfter.slice(0, dictBefore.length)).toEqual(dictBefore);
+    expect(dictAfter.length).toBe(dictBefore.length + 200);
   });
 
   it("does not grow when the same string is written over and over", async () => {

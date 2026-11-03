@@ -25,7 +25,8 @@ import { bytesIn, f64In, i32In, stringIn, u32In, withInput } from "../../src/eng
  * friendlier path of their own.
  */
 
-const ENGINE_URL = "https://engine.test/engine.wasm";
+/** The URL serveEngine() answers. Pass it as wasmUrl to createEngine. */
+export const ENGINE_URL = "https://engine.test/engine.wasm";
 const ENGINE_PATH = resolve(process.cwd(), "src/wasm/engine.wasm");
 
 /**

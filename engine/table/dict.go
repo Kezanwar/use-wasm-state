@@ -42,7 +42,7 @@ func (d *dictionary) sizeHint(rows int32) {
 // column has seen it.
 func (d *dictionary) intern(s string) int32 {
 	h := hashString(s)
-	for _, id := range d.index[h] {
+	for _, id := range d.index[bucket(h)] {
 		if d.values[id] == s {
 			return id
 		}
@@ -54,7 +54,7 @@ func (d *dictionary) intern(s string) int32 {
 // only when the value is new.
 func (d *dictionary) internBytes(b []byte) int32 {
 	h := hashBytes(b)
-	for _, id := range d.index[h] {
+	for _, id := range d.index[bucket(h)] {
 		if stringEqualsBytes(d.values[id], b) {
 			return id
 		}
@@ -70,7 +70,7 @@ func (d *dictionary) add(h uint64, s string) int32 {
 	}
 	id := int32(len(d.values))
 	d.values = append(d.values, s)
-	d.index[h] = append(d.index[h], id)
+	d.index[bucket(h)] = append(d.index[bucket(h)], id)
 	return id
 }
 
@@ -88,6 +88,14 @@ const (
 	fnvOffset uint64 = 14695981039346656037
 	fnvPrime  uint64 = 1099511628211
 )
+
+// hashMask narrows the bucket space. It is all ones in production, so
+// bucket() is an AND the compiler can see through. Tests set it to force
+// every value into a handful of buckets, because real FNV-1a collisions
+// are too rare to reach the comparison path any other way.
+var hashMask = ^uint64(0)
+
+func bucket(h uint64) uint64 { return h & hashMask }
 
 func hashString(s string) uint64 {
 	h := fnvOffset
