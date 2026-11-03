@@ -8,13 +8,10 @@ import {
 import { watToWasm } from "../helpers/wat";
 
 /**
- * Adapted from react-use-wasm, where this behaviour is covered through
- * test/use-wasm.test.tsx. Keep in sync until extracted to a shared core.
- *
- * Rewritten rather than copied: the original drives the loader by rendering
- * a hook, and there is no hook here. The loader is reached directly instead,
- * with `fetch` stubbed so the cache, the streaming fallback and the error
- * paths are all observable.
+ * The loader, reached directly rather than through a hook, with `fetch`
+ * stubbed. Everything worth checking here is invisible from above: that the
+ * compiled-module cache really is a cache, that the streaming fallback
+ * fires on the wrong MIME type, and that each instance gets its own memory.
  */
 
 const URL_A = "https://example.test/a.wasm";

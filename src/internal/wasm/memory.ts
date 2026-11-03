@@ -1,17 +1,12 @@
 /**
- * Copied from react-use-wasm src/memory.ts.
- * Keep in sync until extracted to a shared core.
+ * The two things every caller of a wasm module needs: the shape of a module
+ * that owns memory, and the arithmetic for reading a buffer back out of it.
  *
- * Only two things survived the copy. The scope allocator and the packed
- * readers that went with it (withScope, stringVal, bytesVal,
- * resolveAllocator) were deleted in build step 4b: they allocate and free a
- * block per operation, which is the opposite of what this engine needs. Its
- * arguments go through the engine-owned input buffer instead, and its
- * results are read out of engine-owned output buffers. See withInput in
- * src/engine/input.ts and "Memory model" in the architecture notes.
- *
- * What is left is the shape of a module that owns memory, and the one piece
- * of arithmetic both halves still speak.
+ * There is deliberately no per-call scope allocator here. Allocating and
+ * freeing a block per operation is the opposite of what this engine wants:
+ * arguments go through its own grow-only input buffer and results are read
+ * out of its own output buffers, so steady state allocates nothing. See
+ * withInput in src/engine/input.ts.
  */
 
 /**

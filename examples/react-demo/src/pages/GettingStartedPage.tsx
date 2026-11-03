@@ -92,10 +92,8 @@ export function GettingStartedPage() {
       <Section title="Sync mode">
         <p className="text-muted-foreground text-sm">
           The engine runs on the main thread, so a viewport is read during render and a mutation is
-          visible on the next line. That is the only mode today. Worker mode will move the engine
-          off the main thread behind the same API; until it lands, <code>mode: "worker"</code>{" "}
-          reports a <code>not_implemented</code> error through <code>status</code> rather than
-          failing quietly.
+          visible on the next line. Nothing is a Promise and there is no transport to go wrong,
+          which is why it is the default.
         </p>
       </Section>
 
@@ -112,7 +110,7 @@ export function GettingStartedPage() {
 
       <Section title="Serving engine.wasm">
         <p className="text-muted-foreground text-sm">
-          The engine is a 38 kB module that imports nothing. It is resolved with{" "}
+          The engine is a 55 kB module that imports nothing. It is resolved with{" "}
           <code>new URL("./engine.wasm", import.meta.url)</code>, which <Name>Vite</Name> and{" "}
           <Name>webpack 5</Name> both understand. The <Name>CJS</Name> build ships a shim for{" "}
           <code>import.meta.url</code>; if a bundler still cannot resolve the asset, pass{" "}

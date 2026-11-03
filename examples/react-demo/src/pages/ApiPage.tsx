@@ -82,7 +82,8 @@ export function ApiPage() {
               ],
               ["initialRows", "Rows inserted once, as soon as the table exists."],
               ["shared", "Share one table by key. Not implemented yet."],
-              ["mode", '"sync" today. "worker" is not implemented yet.'],
+              ["mode", '"sync" on the main thread, or "worker" off it.'],
+              ["workerUrl", "Where to fetch the worker bundle from, in worker mode."],
             ]}
           />
           <p>

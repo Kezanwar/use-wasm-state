@@ -151,7 +151,7 @@ explicit `worker-src`.
 
 ## Serving engine.wasm
 
-The engine is a 38 kB module that imports nothing. It is resolved with
+The engine is a 55 kB module that imports nothing. It is resolved with
 `new URL("./engine.wasm", import.meta.url)`, which Vite and webpack 5 both
 understand and which keeps the streaming compile.
 
@@ -172,6 +172,8 @@ an assistant for code.
 engine/    Go source for the bundled wasm. `table` is pure Go and tests with
            plain `go test`; main.go is the thin ABI layer on top.
 src/       the npm package: engine clients, stores, React hooks.
+           `internal/wasm` is the generic half, a module loader and the
+           pointer arithmetic, and is not re-exported.
 test/      vitest.
 e2e/       Playwright, for the things only a browser can run.
 examples/  the Vite docs site: getting started, live examples, API.
@@ -184,29 +186,33 @@ TinyGo installed. Rebuild it only when `engine/` changes.
 The engine core is plain Go with no wasm in it, so `pnpm test:go` needs no
 TinyGo either.
 
-Measured in Node against the committed 25kB module, 200k rows of i32, f64
+Measured in Node against the committed module, 200k rows of i32, f64
 and dictionary-encoded string:
 
 | | |
 | --- | --- |
-| `insertColumns` (the whole dataset, one call) | ~14ms |
-| `view(start, 50)` including decoding it in JS | ~2.3us |
-| `setCell` | ~1.3ms |
+| `insertColumns`, the whole dataset in one call | 15ms |
+| `view(start, 50)`, rows decoded into JS | 6.5us |
+| `setCell` | 0.3us |
+| `setCell` with a sort active | 4.4ms |
+| `sortBy` on an f64 column | 4.3ms |
+| `search` | 1.5ms |
 
 `pnpm exec node scripts/bench-engine.mjs` reproduces them.
 
-A cell edit costs more than a viewport read because every mutation rebuilds
-the row order, which is O(rows) whatever it touched. That is deliberate: step
-7 makes the order the output of a stored sort/filter spec, where one edited
-cell can move a row anywhere.
+An edit is cheap until a sort or filter is active, and then it costs a row
+order rebuild, which is O(rows) however small the edit was. That is the
+honest price of the design: the order is the output of a stored query, and
+one changed cell can move a row anywhere in it.
 
-### Known limitation: linear memory only grows
+### Memory
 
-The module ships with TinyGo's `leaking` collector, which never reclaims
-anything, so a long-lived table grows and never shrinks (measured: 32MB after
-400k rows arriving in batches). `-gc=conservative` holds memory flat but
-takes a 200k-row insert from 11ms to 1,700ms, which is worse. See the note in
-`scripts/build-wasm.mjs`, and re-measure when TinyGo's wasm GC improves.
+Built with TinyGo's `-gc=precise`, not this target's default `leaking`
+collector, so a long-lived table gives memory back. Over 400k rows arriving
+in batches, precise holds at 16MB of linear memory where leaking reaches
+32MB, and it costs 1.4x on the one bulk insert. `-gc=conservative` holds the
+same memory but takes a 200k-row insert to 1,700ms. The reasoning is in
+`scripts/build-wasm.mjs`; re-measure before changing it.
 
 ## Scripts
 
@@ -227,7 +233,7 @@ Nothing else does.
 ## Build order
 
 1. ~~Scaffold workspace, tooling, CI~~
-2. ~~Copy the `internal/wasm` helpers and their tests~~
+2. ~~`internal/wasm` loader and memory helpers, with tests~~
 3. ~~Go `table` package: schema, insert, view~~
 4. ~~ABI in `main.go`, build, `abi.test.ts`~~
 5. ~~`SyncClient` + `TableStore` + `useWasmTable` / `useTableView`~~
@@ -236,17 +242,6 @@ Nothing else does.
 8. ~~`WorkerClient` + worker mode~~
 9. Provider / shared tables
 10. Benchmarks against a plain JS implementation, docs
-
-## A note on `src/internal/wasm/`
-
-Those three files are copied from
-[react-use-wasm](https://github.com/Kezanwar/react-use-wasm) with their tests,
-stripped of anything hook-shaped. The two libraries have different lifecycles
-(a shared engine instance versus one module per component), so they are not
-built on each other yet. Each copied file says so in its header. If the
-duplication starts to hurt, they get extracted into a shared core.
-
-They are deliberately not re-exported from `src/index.ts`.
 
 ## Licence
 

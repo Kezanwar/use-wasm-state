@@ -2,10 +2,9 @@
  * Public surface of use-wasm-state.
  *
  * Everything under src/engine and src/internal stays private: the wire
- * format, the allocator protocol and the copied react-use-wasm helpers are
- * contracts between this package and its own module, not API. The one
- * exception is WasmStateError, which a consumer has to be able to catch and
- * name.
+ * format, the allocator protocol and the module loader are contracts
+ * between this package and its own engine, not API. The one exception is
+ * WasmStateError, which a consumer has to be able to catch and name.
  */
 
 export { createEngine } from "./store/create-engine";

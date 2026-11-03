@@ -3,11 +3,11 @@ import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 /**
- * Copied from react-use-wasm test/dist-output.test.ts and trimmed to what
- * the package exports today. Keep in sync until extracted to a shared core.
+ * Guards the published artefact, which is the one thing no other test sees:
+ * every assertion here is a bug that only shows up after `npm install`.
  *
- * Guards the published artefact. Run `pnpm build` first; these skip if dist
- * is absent so `vitest` alone still works on a clean checkout.
+ * Run `pnpm build` first. These skip when dist is absent, so `vitest` alone
+ * still works on a clean checkout.
  */
 
 const root = process.cwd();
@@ -84,8 +84,9 @@ describe.skipIf(!built)("dist", () => {
   });
 
   it("keeps the internal helpers out of the public types", () => {
-    // They are react-use-wasm's API, copied in. Re-exporting them would
-    // make a second copy of it something this package has to support.
+    // Loading a module and packing a pointer are this engine's own
+    // plumbing. Exporting them would turn an implementation detail into
+    // API that every later version has to keep working.
     const types = readFileSync(dist("index.d.ts"), "utf8");
     for (const name of ["unpack", "loadModule", "createHost", "withInput"]) {
       expect(types, name).not.toContain(name);

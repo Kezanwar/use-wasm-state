@@ -1,11 +1,11 @@
 /**
- * Copied from react-use-wasm src/use-wasm.ts.
- * Keep in sync until extracted to a shared core.
+ * Getting a WebAssembly module from a URL into an instance.
  *
- * Only the module-loading half came across: the compiled-module cache, the
- * compileStreaming fallback and the reactor `_initialize` call. The hook,
- * its state union and its typed `call` helper stayed behind — this layer is
- * framework-agnostic and knows nothing about React.
+ * Deliberately generic: a compiled-module cache, a compileStreaming
+ * fallback for hosts that send the wrong MIME type, and the reactor
+ * `_initialize` call. Nothing here knows about tables, this engine's ABI or
+ * React, which is why the same three functions serve the main thread, the
+ * worker and the Node test suite.
  */
 
 /**
