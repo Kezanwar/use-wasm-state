@@ -34,8 +34,8 @@ export function Basket() {
   );
 }`;
 
-const VIEWPORT = `// 200,000 rows live in Go. Fifty cross to JS.
-const view = useDataGridView(grid, Math.floor(scrollTop / 32), 50);
+const VIEWPORT = `// 200,000 rows live in Go. Only the ones on screen cross to JS.
+const { ref, totalHeight, offsetY, view } = useDataGridWindow(grid, { rowHeight: 32 });
 
 // An edit is one call and one revision bump.
 grid.setCell(rowId, "price", 12.5);`;

@@ -149,7 +149,6 @@ function Pane({
         <Grid
           grid={grid}
           rowCount={stats.rowCount}
-          overscan={16}
           selection={selection}
           onSelectionChange={setSelection}
           onEdit={(run) => void measure(run)}

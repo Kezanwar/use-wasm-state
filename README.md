@@ -66,8 +66,8 @@ watches that counter, and each component reads back only the rows it is
 showing.
 
 ```tsx
-// 200,000 rows live in Go. Fifty cross to JS.
-const view = useDataGridView(grid, Math.floor(scrollTop / 32), 50);
+// 200,000 rows live in Go. Only the ones on screen cross to JS.
+const { ref, totalHeight, offsetY, view } = useDataGridWindow(grid, { rowHeight: 32 });
 
 // An edit is one call and one revision bump.
 grid.setCell(rowId, "price", 12.5);
@@ -139,7 +139,7 @@ await grid.sortBy("price", "desc");
 
 The first gives a `DataGridStore`, the second an `AsyncDataGridStore`. Both
 satisfy `DataGridReader`, which is what `useDataGridView`,
-`useDataGridStats` and `useDataGridQuery` take, so a component that only
+`useDataGridWindow`, `useDataGridStats` and `useDataGridQuery` take, so a component that only
 reads does not care which it was handed. A component that awaits every
 mutation it makes can take `AnyDataGridStore` and run under either mode
 unchanged; on a sync store the `await` costs a microtask and nothing else.

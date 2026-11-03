@@ -131,6 +131,14 @@ Both return a discriminated union:
 
 One window, or `null` while loading. Re-renders when the revision moves.
 
+### `useDataGridWindow(grid, { rowHeight, overscan? })`
+
+Virtualisation. Returns `{ ref, totalHeight, offsetY, view, scrollToRow }`:
+attach `ref` to the scroll container, give its content `totalHeight`, draw
+`view` translated by `offsetY`. Fixed row heights. Follows the scroll
+exactly in sync mode and in blocks in a worker. `scrollToRow(row)` brings a
+row into view, for keyboard navigation.
+
 ### `useDataGridStats(grid)`
 
 `{ revision, rowCount, totalRows }` or `null`. For headers and status bars.
@@ -139,7 +147,7 @@ One window, or `null` while loading. Re-renders when the revision moves.
 
 The current `{ sort, filters, search }` or `null`. For a toolbar.
 
-All three read hooks take a `DataGridReader`, which both stores satisfy.
+All four read hooks take a `DataGridReader`, which both stores satisfy.
 
 ## Sort, filter and search
 

@@ -14,6 +14,7 @@ import {
   useDataGridQuery,
   useDataGridStats,
   useDataGridView,
+  useDataGridWindow,
   useWasmDataGridAsync,
   useWasmDataGridSync,
   type AnyDataGridStore,
@@ -164,6 +165,18 @@ describe("useDataGridView", () => {
 
   it("carries the schema through", () => {
     expectTypeOf(useDataGridView(grid, 0, 10)).toEqualTypeOf<DataGridView<Schema> | null>();
+  });
+});
+
+describe("useDataGridWindow", () => {
+  it("accepts null while loading, carries the schema, and fits any element's ref", () => {
+    const w = useDataGridWindow<Schema>(null, { rowHeight: 32 });
+    expectTypeOf(w.view).toEqualTypeOf<DataGridView<Schema> | null>();
+    expectTypeOf(
+      useDataGridWindow(grid, { rowHeight: 32 }).view
+    ).toEqualTypeOf<DataGridView<Schema> | null>();
+    assertType<React.Ref<HTMLDivElement>>(w.ref);
+    assertType<React.Ref<HTMLTableSectionElement>>(w.ref);
   });
 });
 

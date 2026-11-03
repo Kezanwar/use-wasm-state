@@ -83,6 +83,17 @@ function useWasmDataGridAsync<S extends SchemaSpec>(
   grid: DataGridReader<S> | null
 ): DataGridStats | null;`,
 
+  useDataGridWindow: `function useDataGridWindow<S extends SchemaSpec>(
+  grid: DataGridReader<S> | null,
+  options: { rowHeight: number; overscan?: number }
+): {
+  ref: (element: HTMLElement | null) => void;
+  totalHeight: number;
+  offsetY: number;
+  view: DataGridView<S> | null;
+  scrollToRow(row: number): void;
+};`,
+
   useDataGridQuery: `function useDataGridQuery<S extends SchemaSpec>(
   grid: DataGridReader<S> | null
 ): Required<DataGridQuery<S>> | null;`,
@@ -155,6 +166,7 @@ defineSchema({ id: "i32", name: "string", price: "f64" });`,
 
   DataGridReader: `interface DataGridReader<S extends SchemaSpec> {
   readonly schema: DataGridSchema<S>;
+  readonly mode: "sync" | "async";
   readonly version: number;
   readonly lastCallMs: number;
   readonly revision: number;

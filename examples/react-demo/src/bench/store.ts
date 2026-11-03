@@ -85,6 +85,7 @@ export function createBaselineStore<S extends SchemaSpec>(
 
   const store: DataGridStore<S> = {
     schema,
+    mode: "sync",
 
     insertRows: (rows) => mutate(() => rowIds(grid.insertColumns(columnsOf(rows)), rows.length)),
     insertColumns: (columns) =>

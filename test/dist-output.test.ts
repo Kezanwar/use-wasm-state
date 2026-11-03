@@ -107,6 +107,7 @@ describe.skipIf(!built)("dist", () => {
         "useWasmDataGridSync",
         "useWasmDataGridAsync",
         "useDataGridView",
+        "useDataGridWindow",
         "useDataGridStats",
         "useDataGridQuery",
         "defineDataGrid",
