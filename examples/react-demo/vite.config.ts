@@ -1,16 +1,15 @@
 import { statSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { defineConfig } from "vite";
-import react from "@vitejs/plugin-react";
+import { reactRouter } from "@react-router/dev/vite";
 import tailwindcss from "@tailwindcss/vite";
+import router from "./react-router.config";
 
 export default defineConfig({
-  // Relative, not "/". The demo deploys to GitHub Pages under a sub-path,
-  // where an absolute "/datagrid.wasm" would 404. Relative keeps dev,
-  // `vite preview`, Playwright and Pages all working from one setting,
-  // and survives the repo being renamed.
-  base: "./",
-  plugins: [react(), tailwindcss()],
+  // The router's basename, in dev too, so a path that works locally works
+  // deployed.
+  base: router.basename,
+  plugins: [tailwindcss(), reactRouter()],
   // Read from the built module, so a size on the page is never typed.
   define: {
     __DATAGRID_WASM_BYTES__: JSON.stringify(

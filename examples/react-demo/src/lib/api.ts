@@ -269,3 +269,15 @@ export const DOCUMENTED = {
   root: Object.keys(ROOT_API),
   datagrid: Object.keys(DATAGRID_API),
 };
+
+/**
+ * Where every documented name is defined, as seen from one page: a hash on
+ * that page, or Core's page for the shared API. A signature links each
+ * name it mentions through this.
+ */
+export function typeLinks(page: "core" | "datagrid"): Record<string, string> {
+  const links: Record<string, string> = {};
+  for (const name of DOCUMENTED.root) links[name] = page === "core" ? `#${name}` : `/#${name}`;
+  if (page === "datagrid") for (const name of DOCUMENTED.datagrid) links[name] = `#${name}`;
+  return links;
+}

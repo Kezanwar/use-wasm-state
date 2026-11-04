@@ -214,7 +214,7 @@ Median of 15 runs over 200,000 rows, on Apple M2 Pro (10 cores, 16 GB), darwin 2
 | JS memory after load | 26.1 MB | 8.4 MB | **2.6 MB** |
 | Wasm memory after load, reserved / live |  |  | 16.8 MB / 8.1 MB |
 
-Typical JS's heap leaves out the strings it shares with the input. `datagrid.wasm` is 57,441 bytes. The [Benchmarks tab](https://kezanwar.github.io/use-wasm-state/#benchmarks) runs the same benchmark in your browser, and adds what each costs in frames.
+Typical JS's heap leaves out the strings it shares with the input. `datagrid.wasm` is 57,441 bytes. The [Benchmarks page](https://kezanwar.github.io/use-wasm-state/datagrid/benchmarks) runs the same benchmark in your browser, and adds what each costs in frames.
 <!-- benchmarks:end -->
 
 Wasm's lead is sorting, including the re-sort an edit costs while a sort

@@ -6,7 +6,7 @@ import { expect, test } from "@playwright/test";
  */
 
 test("shows the published figures and where they came from", async ({ page }) => {
-  await page.goto("/#benchmarks");
+  await page.goto("datagrid/benchmarks");
   await expect(page.getByTestId("speed-chart")).toBeVisible();
   const published = page.getByTestId("bench-published");
   await expect(published).toContainText("Node");
@@ -17,7 +17,7 @@ test("shows the published figures and where they came from", async ({ page }) =>
 
 test("runs on this machine without freezing the page", async ({ page }) => {
   // ?quick shrinks the run to seconds; the runner and the page are the same.
-  await page.goto("/?quick#benchmarks");
+  await page.goto("datagrid/benchmarks?quick");
   await page.getByTestId("bench-run").click();
 
   // Sample frames for the length of the run. It pauses between samples, so
@@ -41,7 +41,7 @@ test("runs on this machine without freezing the page", async ({ page }) => {
 });
 
 test("the same sort costs frames under JS and none in a worker", async ({ page }) => {
-  await page.goto("/#benchmarks");
+  await page.goto("datagrid/benchmarks");
   const js = page.getByTestId("side-js");
   const wasm = page.getByTestId("side-wasm");
   await expect(js.locator('[role="row"]').first()).toBeVisible({ timeout: 60_000 });

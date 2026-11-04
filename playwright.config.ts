@@ -2,7 +2,9 @@ import { defineConfig, devices } from "@playwright/test";
 
 const PORT = 5174;
 const SUBPATH_PORT = 4178;
-const baseURL = `http://localhost:${PORT}`;
+// The router's basename, in dev as on Pages. Paths in tests are relative
+// to it: "datagrid/api", not "/datagrid/api".
+const baseURL = `http://localhost:${PORT}/use-wasm-state/`;
 
 /**
  * The browser is the only place the real thing runs: a module Worker from a
@@ -23,7 +25,7 @@ export default defineConfig({
     {
       // The demo resolves `use-wasm-state` through the workspace link to
       // dist/, so the package has to be built first.
-      command: `pnpm build && pnpm --filter use-wasm-state-demo exec vite --port ${PORT} --strictPort`,
+      command: `pnpm build && pnpm --filter use-wasm-state-demo exec react-router dev --port ${PORT} --strictPort`,
       url: baseURL,
       reuseExistingServer: !process.env.CI,
       timeout: 180_000,

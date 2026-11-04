@@ -18,7 +18,9 @@
     "baseUrl": ".",
     "paths": {
       "use-wasm-state": ["./src/index.ts"],
-      "use-wasm-state/datagrid": ["./src/datagrid/index.ts"]
+      "use-wasm-state/datagrid": ["./src/datagrid/index.ts"],
+      "@/*": ["./examples/react-demo/src/*"],
+      "react-router": ["./examples/react-demo/node_modules/react-router"]
     }
   },
   "include": [

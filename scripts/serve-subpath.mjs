@@ -7,15 +7,20 @@
  * production, which is the worst place to find out, so the browser suite
  * exercises it against this server.
  *
- *   /use-wasm-state/  the real thing, .wasm served as application/wasm
- *   /badmime/         .wasm served as octet-stream, so the test can prove
- *                     the loader falls back from compileStreaming to compile
+ * Every route is a pre-rendered page, so a path is a directory with an
+ * index.html, the way Pages resolves it. Two variants, by query string on
+ * the page, since the router only answers under its basename:
+ *
+ *   ?badmime  .wasm the page fetches is served as octet-stream, so the test
+ *             can prove the loader falls back from compileStreaming
+ *   ?csp      the page is served with a strict worker-src
  */
 import { createServer } from "node:http";
-import { readFile } from "node:fs/promises";
+import { readFile, stat } from "node:fs/promises";
 import { extname, join, normalize, resolve } from "node:path";
 
-const DIST = resolve(process.cwd(), "examples/react-demo/dist");
+const DIST = resolve(process.cwd(), "examples/react-demo/dist/client");
+const BASE = "/use-wasm-state/";
 const PORT = Number(process.env.SUBPATH_PORT ?? 4178);
 
 const TYPES = {
@@ -28,26 +33,19 @@ const TYPES = {
   ".ico": "image/x-icon",
 };
 
-const ROUTES = [
-  ["/use-wasm-state/", false],
-  ["/badmime/", true],
-  // A strict CSP that names worker-src explicitly, so a blob: worker
-  // would be refused. The package resolves a real worker.js instead,
-  // which this allows; see e2e/subpath.spec.ts.
-  ["/csp/", false],
-];
-
 createServer(async (req, res) => {
-  const { pathname } = new URL(req.url ?? "/", "http://localhost");
-  const route = ROUTES.find(([prefix]) => pathname.startsWith(prefix));
-  if (!route) {
+  const { pathname, searchParams } = new URL(req.url ?? "/", "http://localhost");
+  if (!pathname.startsWith(BASE)) {
     res.writeHead(404).end("outside the base path, which is the point");
     return;
   }
 
-  const [prefix, badMime] = route;
-  const file = join(DIST, normalize("/" + (pathname.slice(prefix.length) || "index.html")));
+  // A wasm fetch carries the page that asked for it as its referrer.
+  const page = new URL(req.headers.referer ?? req.url ?? "/", "http://localhost").searchParams;
+  const badMime = page.has("badmime");
+  let file = join(DIST, normalize("/" + pathname.slice(BASE.length)));
   try {
+    if ((await stat(file)).isDirectory()) file = join(file, "index.html");
     const body = await readFile(file);
     const ext = extname(file);
     const type =
@@ -55,7 +53,7 @@ createServer(async (req, res) => {
         ? "application/octet-stream"
         : (TYPES[ext] ?? "application/octet-stream");
     const headers = { "content-type": type };
-    if (prefix === "/csp/") {
+    if (searchParams.has("csp")) {
       // Only worker-src, which is the one thing this route is for: a page
       // that allows workers from its own origin and nothing else. A blob:
       // worker would be refused here, which is why the package resolves a

@@ -6,7 +6,7 @@ type Theme = "light" | "dark";
 
 /**
  * Dark unless the visitor has chosen light here before. The OS preference is
- * deliberately ignored: the palette was designed dark, and index.html sets
+ * deliberately ignored: the palette was designed dark, and root.tsx sets
  * the class by the same rule before first paint.
  */
 function initialTheme(): Theme {
@@ -18,9 +18,14 @@ function initialTheme(): Theme {
 }
 
 export function ThemeToggle() {
-  const [theme, setTheme] = useState<Theme>(initialTheme);
+  // Unknown until mounted: the pre-rendered page cannot read storage, so
+  // the first client render must draw what the server drew.
+  const [theme, setTheme] = useState<Theme | null>(null);
+
+  useEffect(() => setTheme(initialTheme()), []);
 
   useEffect(() => {
+    if (!theme) return;
     document.documentElement.classList.toggle("dark", theme === "dark");
     try {
       localStorage.setItem("theme", theme);
@@ -38,7 +43,7 @@ export function ThemeToggle() {
       data-testid="theme-toggle"
       onClick={() => setTheme((t) => (t === "dark" ? "light" : "dark"))}
     >
-      {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+      {theme === "light" ? <Moon className="size-4" /> : <Sun className="size-4" />}
     </Button>
   );
 }

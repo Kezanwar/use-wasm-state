@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { cn } from "cn";
+import { AnchorLink, slug } from "@/components/Anchor";
 import { CodeTabs, type CodeVariant } from "@/components/CodeBlock";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { BasicAsync } from "@/examples/BasicAsync";
@@ -77,9 +78,12 @@ export function ExamplesPage() {
       {EXAMPLES.map((example) => {
         const { Example, sources } = example[mode];
         return (
-          <Card key={example.title}>
+          <Card key={example.title} id={slug(example.title)} className="scroll-mt-6">
             <CardHeader>
-              <CardTitle className="text-base">{example.title}</CardTitle>
+              <CardTitle className="group/heading flex items-center gap-2 text-base">
+                {example.title}
+                <AnchorLink id={slug(example.title)} />
+              </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
               {/* Keyed on the mode, so a switch is a clean unmount and the

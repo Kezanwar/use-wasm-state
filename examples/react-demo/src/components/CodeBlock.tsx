@@ -1,6 +1,7 @@
 import { Check, Copy, FileCode2 } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { Highlight, type PrismTheme } from "prism-react-renderer";
+import { Link } from "react-router";
 import { cn } from "cn";
 
 /**
@@ -20,10 +21,16 @@ export function HighlightedCode({
   code,
   language = "tsx",
   className,
+  links,
+  self,
 }: {
   code: string;
   language?: string;
   className?: string;
+  /** Identifiers to link, to where each is defined. See typeLinks. */
+  links?: Record<string, string>;
+  /** The name being defined, which is not linked to itself. */
+  self?: string;
 }) {
   return (
     <Highlight code={code.trim()} language={language} theme={NO_INLINE_THEME}>
@@ -33,15 +40,39 @@ export function HighlightedCode({
             {tokens.map((line, i) => (
               // eslint-disable-next-line react/no-array-index-key
               <div key={i} {...getLineProps({ line })}>
-                {line.map((token, key) => (
-                  <span key={key} {...getTokenProps({ token })} />
-                ))}
+                {line.map((token, key) => {
+                  const { className: tokenClass, children } = getTokenProps({ token });
+                  return (
+                    <span key={key} className={tokenClass}>
+                      {links && typeof children === "string"
+                        ? linkify(children, links, self)
+                        : children}
+                    </span>
+                  );
+                })}
               </div>
             ))}
           </code>
         </pre>
       )}
     </Highlight>
+  );
+}
+
+/** Split text on identifiers and link each one that has somewhere to go. */
+function linkify(text: string, links: Record<string, string>, self?: string): ReactNode[] {
+  return text.split(/([A-Za-z_$][\w$]*)/).map((part, i) =>
+    links[part] && part !== self ? (
+      <Link
+        key={i}
+        to={links[part]}
+        className="underline decoration-dotted underline-offset-2 hover:decoration-solid"
+      >
+        {part}
+      </Link>
+    ) : (
+      part
+    )
   );
 }
 

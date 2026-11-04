@@ -1,33 +1,33 @@
 import { expect, test, type Page } from "@playwright/test";
+import { ROUTES } from "./helpers";
 
 /**
- * One screenshot per tab, in both themes. Not assertions: these are the
+ * One screenshot per page, in both themes. Not assertions: these are the
  * artifacts to look at when something reads wrong but nothing fails.
  */
-
-const TABS = ["start", "examples", "benchmarks", "api"] as const;
 
 async function setTheme(page: Page, theme: "dark" | "light") {
   await page.addInitScript((value) => {
     try {
       localStorage.setItem("theme", value);
     } catch {
-      // Blocked storage: index.html falls back to dark, which is the
+      // Blocked storage: root.tsx falls back to dark, which is the
       // default anyway.
     }
   }, theme);
 }
 
 for (const theme of ["dark", "light"] as const) {
-  for (const tab of TABS) {
+  for (const [path] of ROUTES) {
+    const tab = path.replace("datagrid/", "datagrid-") || "core";
     test(`${tab} in ${theme}`, async ({ page }, testInfo) => {
       await setTheme(page, theme);
       await page.setViewportSize({ width: 1280, height: 900 });
-      await page.goto(`/#${tab}`);
+      await page.goto(path);
 
       // The grid loads 200k rows; without waiting the Examples shot is of
       // a skeleton.
-      if (tab === "examples") {
+      if (path === "datagrid/examples") {
         await expect(page.getByTestId("row-count")).toHaveText("200,000", { timeout: 60_000 });
       }
       await page.waitForTimeout(300);

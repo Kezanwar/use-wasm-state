@@ -13,14 +13,23 @@ export type Mode = (typeof MODES)[number];
  */
 export const PROD = "http://localhost:4178/use-wasm-state/";
 
+/** Every route, relative to the basename, with something only that page shows. */
+export const ROUTES = [
+  ["", "What it is"],
+  ["datagrid/start", "Install"],
+  ["datagrid/examples", "Basic"],
+  ["datagrid/benchmarks", "Frames"],
+  ["datagrid/api", "Hooks"],
+] as const;
+
 /**
- * Open the Examples tab with the grid loaded in a given mode.
+ * Open the Examples page with the grid loaded in a given mode.
  *
  * Worker mode is reached through the toolbar switch rather than a URL, so
  * the test exercises the same path a visitor does.
  */
-export async function ready(page: Page, mode: Mode = "sync", base = "/") {
-  await page.goto(`${base}#examples`);
+export async function ready(page: Page, mode: Mode = "sync", base = "") {
+  await page.goto(`${base}datagrid/examples`);
   await expect(page.getByTestId("row-count")).toHaveText("200,000", { timeout: 60_000 });
 
   if (mode === "worker") {

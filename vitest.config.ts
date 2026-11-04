@@ -14,6 +14,17 @@ export default defineConfig({
         find: /^use-wasm-state\/datagrid$/,
         replacement: fileURLToPath(new URL("./src/datagrid/index.ts", import.meta.url)),
       },
+      // The docs site's own imports, for the tests that render its pages.
+      {
+        find: /^@\//,
+        replacement: fileURLToPath(new URL("./examples/react-demo/src/", import.meta.url)),
+      },
+      {
+        find: /^react-router$/,
+        replacement: fileURLToPath(
+          new URL("./examples/react-demo/node_modules/react-router", import.meta.url)
+        ),
+      },
     ],
   },
   test: {

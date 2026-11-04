@@ -1,3 +1,4 @@
+import { AnchorLink, slug } from "@/components/Anchor";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Play } from "lucide-react";
 import { cn } from "cn";
@@ -69,10 +70,13 @@ export function BenchmarksPage() {
 
   return (
     <div className="space-y-6">
-      <Card>
+      <Card id="results" className="scroll-mt-6">
         <CardHeader className="flex flex-row items-start justify-between gap-4">
           <div className="space-y-1">
-            <CardTitle className="text-base">{results.rows.toLocaleString("en-US")} rows</CardTitle>
+            <CardTitle className="group/heading flex items-center gap-2 text-base">
+              {results.rows.toLocaleString("en-US")} rows
+              <AnchorLink id="results" />
+            </CardTitle>
             <p className="text-muted-foreground text-sm" data-testid="bench-summary">
               {summary(results)}
             </p>
@@ -127,9 +131,12 @@ export function BenchmarksPage() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="frames" className="scroll-mt-6">
         <CardHeader>
-          <CardTitle className="text-base">Frames</CardTitle>
+          <CardTitle className="group/heading flex items-center gap-2 text-base">
+            Frames
+            <AnchorLink id="frames" />
+          </CardTitle>
           <p className="text-muted-foreground text-sm">
             On the main thread the cost is frames, not just milliseconds. Sort a column on each
             side.
@@ -179,9 +186,12 @@ function FiguresTable({
   testId: string;
 }) {
   return (
-    <div className="min-w-0 space-y-2" data-testid={testId}>
+    <div id={slug(title)} className="min-w-0 scroll-mt-6 space-y-2" data-testid={testId}>
       <div>
-        <h3 className="text-sm font-medium">{title}</h3>
+        <h3 className="group/heading flex items-center gap-2 text-sm font-medium">
+          {title}
+          <AnchorLink id={slug(title)} />
+        </h3>
         <p className="text-muted-foreground truncate text-xs">{caption}</p>
       </div>
       <table className="w-full text-xs">

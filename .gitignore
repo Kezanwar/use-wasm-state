@@ -11,3 +11,6 @@ test-results/
 playwright-report/
 .playwright/
 internal_docs/
+
+# React Router typegen
+.react-router/

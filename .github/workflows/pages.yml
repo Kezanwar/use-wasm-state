@@ -36,15 +36,15 @@ jobs:
       # build cannot resolve it.
       - run: pnpm build
 
-      # vite.config.ts sets `base: "./"`, so the bundle works from any
-      # sub-directory without naming the repo. Nothing to configure here.
+      # Pre-renders every route under the /use-wasm-state/ basename set in
+      # react-router.config.ts.
       - run: pnpm --filter use-wasm-state-demo build
 
       - uses: actions/configure-pages@v5
 
       - uses: actions/upload-pages-artifact@v3
         with:
-          path: examples/react-demo/dist
+          path: examples/react-demo/dist/client
 
   deploy:
     needs: build

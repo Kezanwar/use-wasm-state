@@ -1,9 +1,14 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { createElement, type ComponentType } from "react";
+import { renderToString } from "react-dom/server";
+import { MemoryRouter } from "react-router";
 import { describe, expect, it } from "vitest";
 import * as root from "../src/index";
 import * as datagrid from "../src/datagrid/index";
-import { DATAGRID_API, DOCUMENTED, ROOT_API } from "../examples/react-demo/src/lib/api";
+import { DATAGRID_API, DOCUMENTED, ROOT_API, typeLinks } from "../examples/react-demo/src/lib/api";
+import { ApiPage } from "../examples/react-demo/src/pages/ApiPage";
+import { CorePage } from "../examples/react-demo/src/pages/CorePage";
 
 /**
  * The API page against the package, one entry point at a time.
@@ -80,4 +85,56 @@ describe("the API page", () => {
     const both = DOCUMENTED.root.filter((name) => DOCUMENTED.datagrid.includes(name));
     expect(both).toEqual([]);
   });
+});
+
+/** Each page as it is pre-rendered, at its own route. */
+const render = (path: string, page: ComponentType) =>
+  renderToString(createElement(MemoryRouter, { initialEntries: [path] }, createElement(page)));
+const PAGES: Record<string, { html: string; names: string[]; api: Record<string, string> }> = {
+  "/": { html: render("/", CorePage), names: DOCUMENTED.root, api: ROOT_API },
+  "/datagrid/api": {
+    html: render("/datagrid/api", ApiPage),
+    names: DOCUMENTED.datagrid,
+    api: DATAGRID_API,
+  },
+};
+const anchors = (html: string) => new Set([...html.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]));
+
+/** Platform and React types, which have no page here, and one example binding. */
+const NOT_OURS = new Set(
+  "ArrayLike Element Error Float64Array HTMLElement Int32Array Iterable JSX Promise ReactNode Readonly Record Required URL Orders".split(
+    " "
+  )
+);
+
+describe("the API pages' anchors and links", () => {
+  for (const [path, page] of Object.entries(PAGES)) {
+    it(`${path} gives every documented name an anchor`, () => {
+      const ids = anchors(page.html);
+      expect(page.names.filter((name) => !ids.has(name))).toEqual([]);
+    });
+
+    it(`${path} links every type its signatures name`, () => {
+      const links = typeLinks(path === "/" ? "core" : "datagrid");
+      const unlinked = Object.entries(page.api).flatMap(([name, signature]) =>
+        [...signature.replace(/\/\/.*$/gm, "").matchAll(/\b[A-Z][A-Za-z0-9]+\b/g)]
+          .map((m) => m[0])
+          .filter((type) => type !== name && !links[type] && !NOT_OURS.has(type))
+          .map((type) => `${name}: ${type}`)
+      );
+      expect(unlinked, "document these, or list them in NOT_OURS").toEqual([]);
+    });
+
+    it(`${path} links only to anchors that exist`, () => {
+      const hrefs = [...page.html.matchAll(/<pre[\s\S]*?<\/pre>/g)].flatMap((pre) =>
+        [...pre[0].matchAll(/href="([^"]+)"/g)].map((m) => m[1]!)
+      );
+      expect(hrefs.length).toBeGreaterThan(0);
+      for (const href of hrefs) {
+        const [target, id] = href.split("#");
+        expect(PAGES[target!], href).toBeDefined();
+        expect(anchors(PAGES[target!]!.html).has(id!), href).toBe(true);
+      }
+    });
+  }
 });

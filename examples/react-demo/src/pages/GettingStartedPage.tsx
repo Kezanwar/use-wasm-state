@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { Link } from "react-router";
+import { AnchorLink, slug } from "@/components/Anchor";
 import { Go, Js, Name, Wasm } from "@/components/Term";
 import { CodeBlock } from "@/components/CodeBlock";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -87,9 +89,12 @@ useWasmDataGridSync(schema, { wasmUrl: "https://cdn.example.com/datagrid.wasm" }
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
   return (
-    <Card>
+    <Card id={slug(title)} className="scroll-mt-6">
       <CardHeader>
-        <CardTitle className="text-base">{title}</CardTitle>
+        <CardTitle className="group/heading flex items-center gap-2 text-base">
+          {title}
+          <AnchorLink id={slug(title)} />
+        </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">{children}</CardContent>
     </Card>
@@ -115,9 +120,9 @@ export function GettingStartedPage() {
           the row order; React owns the scroll position and the selection. A counter on the grid
           bumps on every mutation, <code>useSyncExternalStore</code> watches that counter, and each
           component reads back only the rows it is showing. The{" "}
-          <a href="#benchmarks" className="text-foreground underline underline-offset-2">
+          <Link to="/datagrid/benchmarks" className="text-foreground underline underline-offset-2">
             benchmarks
-          </a>{" "}
+          </Link>{" "}
           show where that wins against plain and tuned JS, and where it does not.
         </p>
         <CodeBlock code={VIEWPORT} label="tsx" />
@@ -138,9 +143,9 @@ export function GettingStartedPage() {
           one round trip covers a whole user action. Mutations return Promises, because they really
           do cross a thread. A sort that stalls the page on the main thread leaves it painting here,
           which the{" "}
-          <a href="#benchmarks" className="text-foreground underline underline-offset-2">
+          <Link to="/datagrid/benchmarks" className="text-foreground underline underline-offset-2">
             benchmarks
-          </a>{" "}
+          </Link>{" "}
           show side by side.
         </p>
         <CodeBlock code={WORKER} label="tsx" />

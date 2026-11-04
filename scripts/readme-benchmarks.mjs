@@ -80,7 +80,7 @@ export function renderBlock(figures, wasmBytes) {
     "",
     "Typical JS's heap leaves out the strings it shares with the input. " +
       `\`datagrid.wasm\` is ${wasmBytes.toLocaleString("en-US")} bytes. ` +
-      "The [Benchmarks tab](https://kezanwar.github.io/use-wasm-state/#benchmarks) runs the same " +
+      "The [Benchmarks page](https://kezanwar.github.io/use-wasm-state/datagrid/benchmarks) runs the same " +
       "benchmark in your browser, and adds what each costs in frames.",
     END
   );

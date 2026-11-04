@@ -4,7 +4,7 @@ import { MODES, type Mode } from "./helpers";
 /** The two smaller examples, each exercised in both modes. */
 
 async function open(page: Page, mode: Mode) {
-  await page.goto("/#examples");
+  await page.goto("datagrid/examples");
   if (mode === "worker") {
     await page.getByTestId("mode-worker").click();
     await expect(page.getByTestId("mode-worker")).toHaveAttribute("aria-pressed", "true");
