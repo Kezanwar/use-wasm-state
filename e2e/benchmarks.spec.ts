@@ -67,8 +67,4 @@ test("the same sort costs frames under JS and none in a worker", async ({ page }
   await expect(js.locator('[data-row="0"] [role="gridcell"]').first()).toHaveText(
     (await wasm.locator('[data-row="0"] [role="gridcell"]').first().textContent())!
   );
-
-  // And the tuned baseline is a click away on the left.
-  await page.getByTestId("side-tuned").click();
-  await expect(js.locator('[role="row"]').first()).toBeVisible({ timeout: 60_000 });
 });

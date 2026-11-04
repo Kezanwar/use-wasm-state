@@ -11,7 +11,7 @@ import { createWasmGrid } from "./wasm";
 
 export const LABELS: Record<ImplId, string> = {
   typical: "Typical JS",
-  tuned: "Tuned JS",
+  tuned: "Hand-optimised JS",
   wasm: "Wasm",
 };
 

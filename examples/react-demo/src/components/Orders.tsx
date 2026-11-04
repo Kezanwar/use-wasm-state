@@ -26,8 +26,6 @@ let carried: DataGridQuery<Schema> = {};
 export interface OrdersProps {
   grid: AnyDataGridStore<Schema> | null;
   error: Error | null;
-  /** Rows rendered past the edge of the viewport. */
-  overscan: number;
 }
 
 /**
@@ -38,7 +36,7 @@ export interface OrdersProps {
  * holds row data in React state. The grid renders whatever the current
  * view returns, and the view is whatever the engine's revision says.
  */
-export function Orders({ grid, error, overscan }: OrdersProps) {
+export function Orders({ grid, error }: OrdersProps) {
   const stats = useDataGridStats(grid);
   const query = useDataGridQuery(grid);
 
@@ -164,7 +162,6 @@ export function Orders({ grid, error, overscan }: OrdersProps) {
           <Grid
             grid={grid}
             rowCount={stats.rowCount}
-            overscan={overscan}
             selection={selection}
             onSelectionChange={setSelection}
             onEdit={(run) => void timed(run)}

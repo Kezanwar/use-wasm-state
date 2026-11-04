@@ -212,6 +212,7 @@ export function createAsyncDataGridStore<S extends SchemaSpec>(
 
   const store: AsyncDataGridStore<S> = {
     schema,
+    mode: "async",
 
     async insertRows(rows) {
       alive("insertRows");

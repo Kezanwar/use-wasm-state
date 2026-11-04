@@ -3,11 +3,10 @@ import { ArrowDown, ArrowUp } from "lucide-react";
 import { cn } from "cn";
 import {
   useDataGridQuery,
-  useDataGridView,
+  useDataGridWindow,
   type AnyDataGridStore,
   type SortDirection,
 } from "use-wasm-state/datagrid";
-import { useVirtualWindow } from "@/hooks/useVirtualWindow";
 import { formatDate, formatPrice } from "@/lib/format";
 import type { Order, orders } from "@/lib/orders";
 
@@ -53,8 +52,6 @@ export const selectionRange = (s: Selection) => ({
 
 export interface GridProps {
   grid: AnyDataGridStore<Schema>;
-  /** Worker mode fetches a window a round trip later, so it reads ahead. */
-  overscan?: number;
   rowCount: number;
   selection: Selection | null;
   onSelectionChange: (selection: Selection | null) => void;
@@ -64,17 +61,10 @@ export interface GridProps {
   onSort: (run: () => unknown) => void;
 }
 
-export function Grid({
-  grid,
-  rowCount,
-  overscan,
-  selection,
-  onSelectionChange,
-  onEdit,
-  onSort,
-}: GridProps) {
-  const window = useVirtualWindow(rowCount, ROW_HEIGHT, overscan);
-  const view = useDataGridView(grid, window.start, window.count);
+export function Grid({ grid, rowCount, selection, onSelectionChange, onEdit, onSort }: GridProps) {
+  const { ref, totalHeight, offsetY, view, scrollToRow } = useDataGridWindow(grid, {
+    rowHeight: ROW_HEIGHT,
+  });
   const query = useDataGridQuery(grid);
 
   const [cursor, setCursor] = useState<Cursor>({ row: 0, col: 0 });
@@ -85,11 +75,11 @@ export function Grid({
       setCursor((current) => {
         const row = Math.max(0, Math.min(rowCount - 1, current.row + rowDelta));
         const col = Math.max(0, Math.min(COLUMNS.length - 1, current.col + colDelta));
-        window.scrollToRow(row);
+        scrollToRow(row);
         return { row, col };
       });
     },
-    [rowCount, window]
+    [rowCount, scrollToRow]
   );
 
   const onKeyDown = (event: React.KeyboardEvent) => {
@@ -167,7 +157,7 @@ export function Grid({
   return (
     <div
       className="min-h-0 flex-1 select-none overflow-auto outline-none"
-      ref={window.ref}
+      ref={ref}
       tabIndex={0}
       onKeyDown={onKeyDown}
       data-testid="grid"
@@ -212,11 +202,10 @@ export function Grid({
 
       {/* Sized to the whole grid so the scrollbar tells the truth, while
           only the visible rows exist in the DOM. */}
-      <div style={{ height: window.totalHeight }} className="relative">
-        {/* Positioned from the view's own start, not the window we asked
-            for. In worker mode the rows may be a round trip behind, and
-            drawing them where they actually belong beats blanking. */}
-        <div style={{ transform: `translateY(${(view?.start ?? window.start) * ROW_HEIGHT}px)` }}>
+      <div style={{ height: totalHeight }} className="relative">
+        {/* At the view's own start, so rows a round trip behind are drawn
+            where they belong rather than blanked. */}
+        <div style={{ transform: `translateY(${offsetY}px)` }}>
           {view?.ids.length
             ? Array.from({ length: view.length }, (_, i) => {
                 const offset = view.start + i;

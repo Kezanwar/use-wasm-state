@@ -66,8 +66,8 @@ watches that counter, and each component reads back only the rows it is
 showing.
 
 ```tsx
-// 200,000 rows live in Go. Fifty cross to JS.
-const view = useDataGridView(grid, Math.floor(scrollTop / 32), 50);
+// 200,000 rows live in Go. Only the ones on screen cross to JS.
+const { ref, totalHeight, offsetY, view } = useDataGridWindow(grid, { rowHeight: 32 });
 
 // An edit is one call and one revision bump.
 grid.setCell(rowId, "price", 12.5);
@@ -139,7 +139,7 @@ await grid.sortBy("price", "desc");
 
 The first gives a `DataGridStore`, the second an `AsyncDataGridStore`. Both
 satisfy `DataGridReader`, which is what `useDataGridView`,
-`useDataGridStats` and `useDataGridQuery` take, so a component that only
+`useDataGridWindow`, `useDataGridStats` and `useDataGridQuery` take, so a component that only
 reads does not care which it was handed. A component that awaits every
 mutation it makes can take `AnyDataGridStore` and run under either mode
 unchanged; on a sync store the `await` costs a microtask and nothing else.
@@ -193,7 +193,7 @@ under one key are `schema_mismatch`, unless their columns are identical.
 
 Median of 15 runs over 200,000 rows, on Apple M2 Pro (10 cores, 16 GB), darwin 24.6.0 arm64, Node v22.23.1, 2026-11-03. Best in bold, with anything within 5% of it.
 
-| | Typical JS | Tuned JS | Wasm |
+| | Typical JS | Hand-optimised JS | Wasm |
 | --- | ---: | ---: | ---: |
 | Load | 28.6 ms | **15.5 ms** | 21.6 ms |
 | Sort f64 | 113 ms | 50.3 ms | **6.87 ms** |

@@ -159,7 +159,8 @@ function summary(results: Results): string {
 
   let text = `Wasm is fastest at ${wasm.length} of ${ops.length}.`;
   if (ahead.length) text += ` JS is ahead on ${list(ahead.map((op) => op.label))}.`;
-  if (close.length) text += ` Tuned JS is within 1.5× on ${list(close.map((op) => op.label))}.`;
+  if (close.length)
+    text += ` ${LABELS.tuned} is within 1.5× on ${list(close.map((op) => op.label))}.`;
   return text;
 }
 

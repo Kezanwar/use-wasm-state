@@ -20,7 +20,6 @@ import sharedAsyncSource from "@/examples/SharedAsync.tsx?raw";
 import basketSource from "@/examples/basket.ts?raw";
 import ordersSource from "@/components/Orders.tsx?raw";
 import gridSource from "@/components/Grid.tsx?raw";
-import virtualSource from "@/hooks/useVirtualWindow.ts?raw";
 
 type Mode = "sync" | "worker";
 
@@ -46,7 +45,6 @@ const EXAMPLES = [
     shared: [
       { label: "Orders.tsx", code: ordersSource },
       { label: "Grid.tsx", code: gridSource },
-      { label: "useVirtualWindow.ts", code: virtualSource, language: "ts" },
     ],
   },
   {
