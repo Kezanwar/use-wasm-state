@@ -15,7 +15,8 @@ export const PROD = "http://localhost:4178/use-wasm-state/";
 
 /** Every route, relative to the basename, with something only that page shows. */
 export const ROUTES = [
-  ["", "What it is"],
+  ["", "The idea"],
+  ["core", "Providers"],
   ["datagrid/start", "Install"],
   ["datagrid/examples", "Basic"],
   ["datagrid/benchmarks", "Frames"],

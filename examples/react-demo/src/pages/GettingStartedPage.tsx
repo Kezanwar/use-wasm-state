@@ -1,9 +1,7 @@
-import type { ReactNode } from "react";
 import { Link } from "react-router";
-import { AnchorLink, slug } from "@/components/Anchor";
+import { Section } from "@/components/Section";
 import { Go, Js, Name, Wasm } from "@/components/Term";
 import { CodeBlock } from "@/components/CodeBlock";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { formatKB } from "@/bench/format";
 
 const INSTALL = `npm install use-wasm-state`;
@@ -87,23 +85,13 @@ useWasmDataGridSync(schema, { wasmUrl: "https://cdn.example.com/datagrid.wasm" }
 // A provider takes the same, per pattern.
 <WasmStateAsyncProvider urls={{ datagrid: { wasmUrl, workerUrl } }}>`;
 
-function Section({ title, children }: { title: string; children: ReactNode }) {
-  return (
-    <Card id={slug(title)} className="scroll-mt-6">
-      <CardHeader>
-        <CardTitle className="group/heading flex items-center gap-2 text-base">
-          {title}
-          <AnchorLink id={slug(title)} />
-        </CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-4">{children}</CardContent>
-    </Card>
-  );
-}
-
 export function GettingStartedPage() {
   return (
     <div className="space-y-6">
+      <p className="text-muted-foreground text-sm">
+        How to install the package, put a grid on the screen, and choose between the main thread and
+        a worker.
+      </p>
       <Section title="Install">
         <CodeBlock code={INSTALL} label="bash" language="bash" />
       </Section>

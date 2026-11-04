@@ -19,7 +19,7 @@ async function setTheme(page: Page, theme: "dark" | "light") {
 
 for (const theme of ["dark", "light"] as const) {
   for (const [path] of ROUTES) {
-    const tab = path.replace("datagrid/", "datagrid-") || "core";
+    const tab = path.replace("datagrid/", "datagrid-") || "home";
     test(`${tab} in ${theme}`, async ({ page }, testInfo) => {
       await setTheme(page, theme);
       await page.setViewportSize({ width: 1280, height: 900 });

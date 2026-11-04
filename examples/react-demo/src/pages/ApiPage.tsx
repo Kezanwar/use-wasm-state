@@ -8,8 +8,9 @@ export function ApiPage() {
     <TypeLinks.Provider value={typeLinks("datagrid")}>
       <div className="space-y-10">
         <p className="text-muted-foreground text-sm">
-          Providers, errors and shared types are on{" "}
-          <Link to="/" className="text-foreground underline underline-offset-2">
+          Every hook, function and type in <code>use-wasm-state/datagrid</code>, and when to reach
+          for each. Providers, errors and shared types are on{" "}
+          <Link to="/core" className="text-foreground underline underline-offset-2">
             Core
           </Link>
           .

@@ -9,6 +9,7 @@ import * as datagrid from "../src/datagrid/index";
 import { DATAGRID_API, DOCUMENTED, ROOT_API, typeLinks } from "../examples/react-demo/src/lib/api";
 import { ApiPage } from "../examples/react-demo/src/pages/ApiPage";
 import { CorePage } from "../examples/react-demo/src/pages/CorePage";
+import { CORE_ANCHORS } from "../examples/react-demo/src/pages/HomePage";
 
 /**
  * The API page against the package, one entry point at a time.
@@ -91,7 +92,7 @@ describe("the API page", () => {
 const render = (path: string, page: ComponentType) =>
   renderToString(createElement(MemoryRouter, { initialEntries: [path] }, createElement(page)));
 const PAGES: Record<string, { html: string; names: string[]; api: Record<string, string> }> = {
-  "/": { html: render("/", CorePage), names: DOCUMENTED.root, api: ROOT_API },
+  "/core": { html: render("/core", CorePage), names: DOCUMENTED.root, api: ROOT_API },
   "/datagrid/api": {
     html: render("/datagrid/api", ApiPage),
     names: DOCUMENTED.datagrid,
@@ -115,7 +116,7 @@ describe("the API pages' anchors and links", () => {
     });
 
     it(`${path} links every type its signatures name`, () => {
-      const links = typeLinks(path === "/" ? "core" : "datagrid");
+      const links = typeLinks(path === "/core" ? "core" : "datagrid");
       const unlinked = Object.entries(page.api).flatMap(([name, signature]) =>
         [...signature.replace(/\/\/.*$/gm, "").matchAll(/\b[A-Z][A-Za-z0-9]+\b/g)]
           .map((m) => m[0])
@@ -137,4 +138,11 @@ describe("the API pages' anchors and links", () => {
       }
     });
   }
+});
+
+describe("links from when Core was the home page", () => {
+  it("redirect only to anchors Core still has", () => {
+    const ids = anchors(PAGES["/core"]!.html);
+    expect([...CORE_ANCHORS].filter((id) => !ids.has(id))).toEqual([]);
+  });
 });

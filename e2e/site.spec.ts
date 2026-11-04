@@ -26,8 +26,27 @@ for (const [hash, path] of [
   });
 }
 
+for (const id of ["WasmStateDef", "providers"]) {
+  test(`the old Core link #${id} redirects to /core#${id}`, async ({ page }) => {
+    await page.goto(`#${id}`);
+    await expect(page).toHaveURL(new RegExp(`/use-wasm-state/core#${id}$`));
+    await expect(page.locator(`#${id}`)).toBeInViewport();
+  });
+}
+
+test("the home page links its headline result to the benchmarks", async ({ page }) => {
+  await page.goto("");
+  await expect(page.getByTestId("home-result")).toContainText(/\d/);
+  await page.getByTestId("home-result").getByRole("link").click();
+  await expect(page).toHaveURL(/\/datagrid\/benchmarks$/);
+});
+
 test("the pattern tabs and the sidebar move between routes, and back returns", async ({ page }) => {
   await page.goto("");
+  await expect(page.getByTestId("tab-home")).toHaveAttribute("data-state", "active");
+
+  await page.getByTestId("tab-core").click();
+  await expect(page).toHaveURL(/\/core$/);
   await expect(page.getByTestId("tab-core")).toHaveAttribute("data-state", "active");
 
   await page.getByTestId("tab-datagrid").click();
@@ -69,9 +88,9 @@ test("a type in a signature links to its definition, on the page and on Core", a
 
   // The shared API is a link away, and Core's signatures link the same way.
   await page.getByRole("link", { name: "Core", exact: true }).last().click();
-  await expect(page).toHaveURL(/\/use-wasm-state\/$/);
+  await expect(page).toHaveURL(/\/use-wasm-state\/core$/);
   await page.locator("#WasmState pre a", { hasText: "WasmStateDef" }).click();
-  await expect(page).toHaveURL(/\/use-wasm-state\/#WasmStateDef$/);
+  await expect(page).toHaveURL(/\/use-wasm-state\/core#WasmStateDef$/);
   await expect(page.locator("#WasmStateDef")).toBeInViewport();
 });
 

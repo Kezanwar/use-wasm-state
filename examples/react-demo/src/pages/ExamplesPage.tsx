@@ -30,6 +30,8 @@ const basket: CodeVariant = { label: "basket.ts", code: basketSource, language: 
 const EXAMPLES = [
   {
     title: "Basic",
+    about:
+      "A small basket on a grid, read back one view at a time. Add a row, edit an item or a quantity, or delete one, and the table follows.",
     sync: {
       Example: BasicSync,
       sources: [{ label: "BasicSync.tsx", code: basicSyncSource }, basket],
@@ -41,6 +43,8 @@ const EXAMPLES = [
   },
   {
     title: "200,000 rows",
+    about:
+      "A full grid: scroll, sort, filter, search and edit 200,000 rows. Shift-click a second column to sort by two keys, then try it in the worker.",
     sync: { Example: GridSync, sources: [{ label: "GridSync.tsx", code: gridSyncSource }] },
     worker: { Example: GridAsync, sources: [{ label: "GridAsync.tsx", code: gridAsyncSource }] },
     shared: [
@@ -50,6 +54,8 @@ const EXAMPLES = [
   },
   {
     title: "One grid, three components",
+    about:
+      "One shared grid read by a summary, a list and an editor. Add or sort in the editor and the others follow; hide the list and show it again, and its rows are still there.",
     sync: {
       Example: SharedSync,
       sources: [{ label: "SharedSync.tsx", code: sharedSyncSource }, basket],
@@ -61,6 +67,7 @@ const EXAMPLES = [
   },
 ] satisfies {
   title: string;
+  about: string;
   sync: { Example: () => ReactNode; sources: CodeVariant[] };
   worker: { Example: () => ReactNode; sources: CodeVariant[] };
   shared?: CodeVariant[];
@@ -71,7 +78,11 @@ export function ExamplesPage() {
 
   return (
     <div className="space-y-6">
-      <div className="flex justify-end">
+      <div className="flex items-center justify-between gap-4">
+        <p className="text-muted-foreground text-sm">
+          Each example runs here, with its source. Switch between the main thread and a worker to
+          see the same code in both.
+        </p>
         <ModeSwitch mode={mode} onMode={setMode} />
       </div>
 
@@ -86,6 +97,7 @@ export function ExamplesPage() {
               </CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              <p className="text-muted-foreground text-sm">{example.about}</p>
               {/* Keyed on the mode, so a switch is a clean unmount and the
                   engine it replaces is disposed. */}
               <Example key={mode} />

@@ -277,7 +277,7 @@ export const DOCUMENTED = {
  */
 export function typeLinks(page: "core" | "datagrid"): Record<string, string> {
   const links: Record<string, string> = {};
-  for (const name of DOCUMENTED.root) links[name] = page === "core" ? `#${name}` : `/#${name}`;
+  for (const name of DOCUMENTED.root) links[name] = page === "core" ? `#${name}` : `/core#${name}`;
   if (page === "datagrid") for (const name of DOCUMENTED.datagrid) links[name] = `#${name}`;
   return links;
 }

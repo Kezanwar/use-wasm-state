@@ -19,7 +19,8 @@ import styles from "./styles.css?url";
 
 /** One tab per state pattern. A new pattern adds a line here and its routes. */
 const PATTERNS = [
-  { to: "/", label: "Core", id: "core" },
+  { to: "/", label: "Home", id: "home" },
+  { to: "/core", label: "Core", id: "core" },
   { to: "/datagrid", label: "DataGrid", id: "datagrid" },
 ] as const;
 
@@ -64,7 +65,7 @@ export function Layout({ children }: { children: ReactNode }) {
 
 export default function App() {
   const { pathname } = useLocation();
-  const pattern = PATTERNS.find((p) => p.to !== "/" && pathname.startsWith(p.to))?.id ?? "core";
+  const pattern = PATTERNS.find((p) => p.to !== "/" && pathname.startsWith(p.to))?.id ?? "home";
 
   return (
     <TooltipProvider>

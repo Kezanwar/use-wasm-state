@@ -1,52 +1,15 @@
-import { useEffect } from "react";
-import { useLocation, useNavigate } from "react-router";
-import { AnchorLink } from "@/components/Anchor";
 import { Entry, EntryPoint, Fields, Group, TypeLinks } from "@/components/ApiDocs";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { ROOT_API as ROOT, typeLinks } from "@/lib/api";
 
-/** Where the old single-page tabs went. */
-const OLD_TABS: Record<string, string> = {
-  start: "/datagrid/start",
-  examples: "/datagrid/examples",
-  benchmarks: "/datagrid/benchmarks",
-  api: "/datagrid/api",
-};
-
 export function CorePage() {
-  const { hash } = useLocation();
-  const navigate = useNavigate();
-  useEffect(() => {
-    const to = OLD_TABS[hash.slice(1)];
-    if (to) navigate(to, { replace: true });
-  }, [hash, navigate]);
-
   return (
     <TypeLinks.Provider value={typeLinks("core")}>
       <div className="space-y-10">
-        <Card id="what-it-is" className="scroll-mt-6">
-          <CardHeader>
-            <CardTitle className="group/heading flex items-center gap-2 text-base">
-              What it is
-              <AnchorLink id="what-it-is" />
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="text-muted-foreground space-y-3 text-sm">
-            <p>
-              Storing arbitrary JS values in wasm is slower than <code>useState</code>, because
-              every read and write has to serialise. Wasm state only pays off when the operations on
-              the state also run in wasm. So this is not generic state: each kind of state ships its
-              own prebuilt engine and does its work in Go, with only what React needs to render
-              crossing back to JS.
-            </p>
-            <p>
-              Two entry points: <code>use-wasm-state</code> holds what every kind of state shares,
-              the providers and <code>WasmStateError</code>; <code>use-wasm-state/datagrid</code>{" "}
-              holds the grid, its hooks, its engine and its worker.
-            </p>
-          </CardContent>
-        </Card>
+        <p className="text-muted-foreground text-sm">
+          What every state pattern shares, from <code>use-wasm-state</code>: the providers that hold
+          shared state, the error every pattern throws, and their types.
+        </p>
 
         <EntryPoint path="use-wasm-state">
           <Group title="Providers">

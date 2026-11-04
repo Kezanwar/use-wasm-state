@@ -70,6 +70,10 @@ export function BenchmarksPage() {
 
   return (
     <div className="space-y-6">
+      <p className="text-muted-foreground text-sm">
+        The engine against typical and hand-optimised JS on the same data, in milliseconds and in
+        frames.
+      </p>
       <Card id="results" className="scroll-mt-6">
         <CardHeader className="flex flex-row items-start justify-between gap-4">
           <div className="space-y-1">
@@ -79,6 +83,11 @@ export function BenchmarksPage() {
             </CardTitle>
             <p className="text-muted-foreground text-sm" data-testid="bench-summary">
               {summary(results)}
+            </p>
+            <p className="text-muted-foreground text-sm">
+              Each figure is the median of {results.repeats} runs after a warm-up, one operation at
+              a time. Lower is better; the best in each row, and anything within 5% of it, is in
+              green.
             </p>
           </div>
           {live?.results && (
