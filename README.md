@@ -193,7 +193,7 @@ under one key are `schema_mismatch`, unless their columns are identical.
 
 Median of 15 runs over 200,000 rows, on Apple M2 Pro (10 cores, 16 GB), darwin 24.6.0 arm64, Node v22.23.1, 2026-11-03. Best in bold, with anything within 5% of it.
 
-| | Typical JS | Tuned JS | Wasm |
+| | Typical JS | Hand-optimised JS | Wasm |
 | --- | ---: | ---: | ---: |
 | Load | 28.6 ms | **15.5 ms** | 21.6 ms |
 | Sort f64 | 113 ms | 50.3 ms | **6.87 ms** |

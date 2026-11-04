@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { Search } from "lucide-react";
-import { cn } from "cn";
 import {
   useDataGridStats,
   useWasmDataGridAsync,
@@ -11,13 +10,11 @@ import { frameBudget, measureFrames, type FrameCost } from "@/bench/frames";
 import { formatMs } from "@/bench/format";
 import { LABELS } from "@/bench/implementations";
 import { createBaselineStore } from "@/bench/store";
-import { createTunedGrid } from "@/bench/tuned";
 import { createTypicalGrid } from "@/bench/typical";
 import { useFrameRate } from "@/hooks/useFrameRate";
 import { generateOrders, orders } from "@/lib/orders";
 
 type Schema = typeof orders.spec;
-type Source = "typical" | "tuned";
 
 const ROWS = 200_000;
 
@@ -28,8 +25,7 @@ const ROWS = 200_000;
  * on each and watch the frames.
  */
 export function SideBySide() {
-  const [source, setSource] = useState<Source>("typical");
-  const left = useBaselineGrid(source);
+  const left = useBaselineGrid();
   const right = useWorkerGrid();
 
   return (
@@ -37,27 +33,7 @@ export function SideBySide() {
       <Pane
         grid={left}
         testId="side-js"
-        title={
-          <div className="flex items-center rounded-md border p-0.5" role="group" aria-label="JS">
-            {(["typical", "tuned"] as const).map((value) => (
-              <button
-                key={value}
-                type="button"
-                aria-pressed={source === value}
-                data-testid={`side-${value}`}
-                onClick={() => setSource(value)}
-                className={cn(
-                  "rounded px-2 py-0.5 text-xs transition-colors",
-                  source === value
-                    ? "bg-primary text-primary-foreground"
-                    : "text-muted-foreground hover:text-foreground"
-                )}
-              >
-                {LABELS[value]}
-              </button>
-            ))}
-          </div>
-        }
+        title={<span className="px-1 text-xs font-medium">{LABELS.typical}</span>}
       />
       <Pane
         grid={right}
@@ -68,20 +44,18 @@ export function SideBySide() {
   );
 }
 
-/** A plain-JS baseline behind the store interface, loaded once per source. */
-function useBaselineGrid(source: Source): AnyDataGridStore<Schema> | null {
+/** The typical-JS baseline behind the store interface, loaded once. */
+function useBaselineGrid(): AnyDataGridStore<Schema> | null {
   const [grid, setGrid] = useState<AnyDataGridStore<Schema> | null>(null);
   useEffect(() => {
-    setGrid(null);
-    // A frame first, so the switch paints before the load blocks.
+    // A frame first, so the page paints before the load blocks.
     const id = requestAnimationFrame(() => {
-      const make = source === "typical" ? createTypicalGrid : createTunedGrid;
-      const store = createBaselineStore(make(orders), orders);
+      const store = createBaselineStore(createTypicalGrid(orders), orders);
       store.insertColumns(generateOrders(ROWS));
       setGrid(store);
     });
     return () => cancelAnimationFrame(id);
-  }, [source]);
+  }, []);
   return grid;
 }
 
