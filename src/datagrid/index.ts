@@ -14,7 +14,12 @@ export type {
   UseWasmDataGridSyncOptions,
 } from "./use-wasm-data-grid";
 
-export { useDataGridQuery, useDataGridStats, useDataGridView } from "./read-hooks";
+export {
+  useDataGridQuery,
+  useDataGridStats,
+  useDataGridView,
+  useDataGridWindow,
+} from "./read-hooks";
 export type { DataGridStats } from "./read-hooks";
 
 export { defineDataGrid } from "./define";

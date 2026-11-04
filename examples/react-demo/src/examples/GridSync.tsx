@@ -4,5 +4,5 @@ import { orders } from "@/lib/orders";
 
 export function GridSync() {
   const { grid, error } = useWasmDataGridSync(orders);
-  return <Orders grid={grid} error={error} overscan={8} />;
+  return <Orders grid={grid} error={error} />;
 }

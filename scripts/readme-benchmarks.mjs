@@ -22,7 +22,7 @@ const START = "<!-- benchmarks:start -->";
 const END = "<!-- benchmarks:end -->";
 const IMPLS = [
   ["typical", "Typical JS"],
-  ["tuned", "Tuned JS"],
+  ["tuned", "Hand-optimised JS"],
   ["wasm", "Wasm"],
 ];
 

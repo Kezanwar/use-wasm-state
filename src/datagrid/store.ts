@@ -94,6 +94,12 @@ export interface DataGridView<S extends SchemaSpec> {
  */
 export interface DataGridReader<S extends SchemaSpec = SchemaSpec> {
   readonly schema: DataGridSchema<S>;
+  /**
+   * Where the engine runs: on this thread, or in a worker a round trip
+   * away. Reads look the same either way; this is for code that tunes
+   * itself to the cost of a read, such as useDataGridWindow.
+   */
+  readonly mode: "sync" | "async";
 
   /**
    * The subscription token: a counter that moves whenever any read could
@@ -256,6 +262,7 @@ export function createDataGridStore<S extends SchemaSpec>(
 
   const store: DataGridStore<S> = {
     schema,
+    mode: "sync",
 
     insertRows(rows) {
       alive("insertRows");

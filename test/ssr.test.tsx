@@ -7,6 +7,7 @@ import {
   useDataGridQuery,
   useDataGridStats,
   useDataGridView,
+  useDataGridWindow,
   useWasmDataGridAsync,
   useWasmDataGridSync,
   type AnyDataGridStore,
@@ -32,8 +33,11 @@ function Show({ result }: { result: UseWasmDataGridResult<AnyDataGridStore<typeo
   const view = useDataGridView(result.grid, 0, 10);
   const stats = useDataGridStats(result.grid);
   const query = useDataGridQuery(result.grid);
+  const window = useDataGridWindow(result.grid, { rowHeight: 32 });
   return (
     <span
+      ref={window.ref}
+      data-height={window.totalHeight}
       data-status={result.status}
       data-rows={view === null ? "none" : String(view.length)}
       data-stats={stats === null ? "none" : String(stats.rowCount)}

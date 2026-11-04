@@ -224,6 +224,18 @@ export function ApiPage() {
 
           <Separator />
 
+          <Entry name="useDataGridWindow" kind="hook" signature={GRID.useDataGridWindow}>
+            <p>
+              Virtualisation that knows the grid. Attach <code>ref</code> to the scroll container,
+              size its content to <code>totalHeight</code>, and draw <code>view</code> at{" "}
+              <code>offsetY</code>. Rows are a fixed height. On the main thread the window follows
+              the scroll exactly; in a worker it moves in blocks, so a drag is not a round trip per
+              frame.
+            </p>
+          </Entry>
+
+          <Separator />
+
           <Entry name="useDataGridStats" kind="hook" signature={GRID.useDataGridStats}>
             <p>
               Size and revision without reading any rows, for a header or a status bar.{" "}
@@ -394,6 +406,7 @@ export function ApiPage() {
             </p>
             <Fields
               rows={[
+                ["mode", "Where the engine runs: this thread, or a worker a round trip away."],
                 ["version", "The subscription token. Moves whenever any read could now differ."],
                 ["lastCallMs", "What the last engine call cost. The round trip in a worker."],
                 ["view", "Best-effort. In a worker, the nearest rows it has rather than nothing."],

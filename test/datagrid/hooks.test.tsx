@@ -9,6 +9,7 @@ import {
   useDataGridQuery,
   useDataGridStats,
   useDataGridView,
+  useDataGridWindow,
   useWasmDataGridAsync,
   useWasmDataGridSync,
   type AsyncDataGridStore,
@@ -551,5 +552,169 @@ describe("useWasmDataGridAsync, given a schema", () => {
       await grid.setCell(0, "status", "shipped");
     });
     await waitFor(() => expect(screen.getByTestId("async").textContent).toBe("1:shipped"));
+  });
+});
+
+describe("useDataGridWindow", () => {
+  const ROW = 10;
+  const rows = (n: number) =>
+    Array.from({ length: n }, (_, i) => ({ id: i, price: i, status: i % 2 ? "odd" : "even" }));
+
+  // jsdom has no layout: the container's size and scroll position are set
+  // by hand, and the resize observer fires when the test says so.
+  const resized: (() => void)[] = [];
+  beforeAll(() => {
+    stubWorker();
+    vi.stubGlobal(
+      "ResizeObserver",
+      class {
+        constructor(fire: () => void) {
+          resized.push(fire);
+        }
+        observe() {}
+        disconnect() {}
+      }
+    );
+  });
+
+  type Window = ReturnType<typeof useDataGridWindow<Schema>>;
+
+  function Windowed({
+    grid,
+    onWindow,
+  }: {
+    grid: DataGridStore<Schema> | AsyncDataGridStore<Schema> | null;
+    onWindow: (w: Window) => void;
+  }) {
+    const w = useDataGridWindow(grid, { rowHeight: ROW });
+    onWindow(w);
+    return <div ref={w.ref} data-testid="scroller" />;
+  }
+
+  function SyncWindowed(props: {
+    onGrid: (g: DataGridStore<Schema>) => void;
+    onWindow: (w: Window) => void;
+  }) {
+    const { grid } = useWasmDataGridSync(schema, { wasmUrl: ENGINE_URL, initialRows: rows(1000) });
+    if (grid) props.onGrid(grid);
+    return <Windowed grid={grid} onWindow={props.onWindow} />;
+  }
+
+  function AsyncWindowed(props: { onWindow: (w: Window) => void }) {
+    const { grid } = useWasmDataGridAsync(schema, { wasmUrl: ENGINE_URL, initialRows: rows(1000) });
+    return <Windowed grid={grid} onWindow={props.onWindow} />;
+  }
+
+  /** Give the container a size and a scroll position, and tell the hook. */
+  function place(height: number, top: number) {
+    const el = screen.getByTestId("scroller");
+    Object.defineProperty(el, "clientHeight", { value: height, configurable: true });
+    Object.defineProperty(el, "scrollTop", { value: top, configurable: true, writable: true });
+    act(() => resized.forEach((fire) => fire()));
+    return el;
+  }
+
+  it("is empty while the grid loads", () => {
+    let w!: Window;
+    render(<Windowed grid={null} onWindow={(x) => (w = x)} />);
+    expect(w.view).toBeNull();
+    expect(w.totalHeight).toBe(0);
+    expect(w.offsetY).toBe(0);
+  });
+
+  it("follows the scroll exactly on the main thread", async () => {
+    let w!: Window;
+    render(<SyncWindowed onGrid={() => {}} onWindow={(x) => (w = x)} />);
+    await waitFor(() => expect(w.totalHeight).toBe(1000 * ROW));
+
+    place(100, 503 * ROW);
+    // Four rows of overscan either side of ten visible, plus one partly
+    // visible, starting four above the top row: no snapping.
+    expect(w.view!.start).toBe(499);
+    expect(w.view!.length).toBe(10 + 8 + 1);
+    expect(w.offsetY).toBe(499 * ROW);
+    expect(w.view!.row(4).id).toBe(503);
+  });
+
+  it("follows inserts, deletes and query changes in its height", async () => {
+    let w!: Window;
+    let grid!: DataGridStore<Schema>;
+    render(<SyncWindowed onGrid={(g) => (grid = g)} onWindow={(x) => (w = x)} />);
+    await waitFor(() => expect(w.totalHeight).toBe(1000 * ROW));
+
+    act(() => void grid.insertRows(rows(5)));
+    expect(w.totalHeight).toBe(1005 * ROW);
+    act(() => grid.deleteRows([0, 1, 2]));
+    expect(w.totalHeight).toBe(1002 * ROW);
+    act(() => grid.filter([{ column: "status", op: "eq", value: "odd" }]));
+    expect(w.totalHeight).toBe(grid.rowCount * ROW);
+    expect(w.view!.rows().every((row) => row.status === "odd")).toBe(true);
+  });
+
+  it("moves in blocks in a worker, and draws rows where they belong", async () => {
+    let w!: Window;
+    render(<AsyncWindowed onWindow={(x) => (w = x)} />);
+    await waitFor(() => expect(w.totalHeight).toBe(1000 * ROW));
+
+    place(100, 503 * ROW);
+    // 503 less sixteen of overscan is 487, snapped down to a block of 16.
+    await waitFor(() => expect(w.view!.start).toBe(480));
+    expect(w.offsetY).toBe(480 * ROW);
+
+    // A few rows further is the same block, so the same window.
+    const before = w.view;
+    place(100, 506 * ROW);
+    expect(w.view).toBe(before);
+  });
+
+  it("re-renders for a row of scroll or a new row count, and never its parent", async () => {
+    let renders = 0;
+    let parentRenders = 0;
+    let grid!: DataGridStore<Schema>;
+
+    function Counted({ grid }: { grid: DataGridStore<Schema> | null }) {
+      renders++;
+      return <div ref={useDataGridWindow(grid, { rowHeight: ROW }).ref} data-testid="scroller" />;
+    }
+    function Parent() {
+      parentRenders++;
+      const result = useWasmDataGridSync(schema, { wasmUrl: ENGINE_URL, initialRows: rows(1000) });
+      if (result.grid) grid = result.grid;
+      return <Counted grid={result.grid} />;
+    }
+
+    render(<Parent />);
+    await waitFor(() => expect(grid).toBeTruthy());
+    const el = place(100, 0);
+    const scroll = (top: number) => {
+      el.scrollTop = top;
+      act(() => void el.dispatchEvent(new Event("scroll")));
+    };
+    const [before, parentBefore] = [renders, parentRenders];
+
+    scroll(ROW / 2); // within the first row
+    act(() => resized.forEach((fire) => fire())); // the same size again
+    expect(renders).toBe(before);
+
+    scroll(3 * ROW);
+    expect(renders).toBe(before + 1);
+    act(() => void grid.insertRows(rows(1)));
+    expect(renders).toBe(before + 2);
+
+    expect(parentRenders).toBe(parentBefore);
+  });
+
+  it("scrolls just far enough to bring a row into view", async () => {
+    let w!: Window;
+    render(<SyncWindowed onGrid={() => {}} onWindow={(x) => (w = x)} />);
+    await waitFor(() => expect(w.totalHeight).toBe(1000 * ROW));
+    const el = place(100, 0);
+
+    w.scrollToRow(50);
+    expect(el.scrollTop).toBe(51 * ROW - 100);
+    w.scrollToRow(20);
+    expect(el.scrollTop).toBe(20 * ROW);
+    w.scrollToRow(25);
+    expect(el.scrollTop).toBe(20 * ROW);
   });
 });
